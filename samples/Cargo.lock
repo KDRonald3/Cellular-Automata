@@ -530,6 +530,7 @@ dependencies = [
  "axum",
  "base64",
  "cellular_automata",
+ "chrono",
  "open",
  "serde",
  "serde_json",

@@ -34,12 +34,16 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     display: grid;
-    grid-template-columns: 0px 1fr;
+    grid-template-columns: 0px 0px 1fr;
     grid-template-rows: 100%;
     transition: grid-template-columns 260ms cubic-bezier(.4,.0,.2,1);
     overflow: hidden;
   }
-  body.sidebar-open { grid-template-columns: var(--sidebar-w) 1fr; }
+  body.sidebar-open { grid-template-columns: var(--sidebar-w) 6px 1fr; }
+  body.resizing { transition: none !important; user-select: none; cursor: col-resize; }
+  #resizer { display: none; cursor: col-resize; border-left: 1px solid var(--rule); background: transparent; transition: background 150ms; }
+  body.sidebar-open #resizer { display: block; }
+  #resizer:hover, body.resizing #resizer { background: var(--accent-br); }
   aside#sidebar {
     overflow: hidden;
     background: var(--bg-sunk);
@@ -178,7 +182,7 @@
   .btn-sm.danger:hover { background: oklch(96% 0.025 22); }
 
   /* Main layout */
-  main#main { min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--bg); }
+  main#main { grid-column: 3; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--bg); }
   header.topbar {
     flex: 0 0 auto; height: 52px; border-bottom: 1px solid var(--rule);
     background: var(--bg); display: flex; align-items: center; gap: 14px; padding: 0 20px 0 14px;
@@ -355,6 +359,83 @@
   #tiles { display: flex; flex-direction: column; align-items: flex-start; }
   #tiles canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; background: white; box-shadow: 0 0 0 1px var(--rule); max-width: none; height: auto; }
   .err-box { margin-top: 18px; padding: 14px 16px; border: 1px dashed oklch(70% 0.12 35); background: oklch(96% 0.03 35); border-radius: 8px; font-family: var(--mono); font-size: 12px; color: oklch(40% 0.12 35); line-height: 1.55; }
+
+  /* Pinned section */
+  #pinned-section { flex: 0 0 auto; border-bottom: 1px solid var(--rule); }
+  #pinned-section > summary {
+    list-style: none; cursor: pointer; padding: 9px 16px 8px;
+    display: flex; align-items: center; gap: 8px; user-select: none;
+    background: var(--bg-card); transition: background 120ms;
+    border-bottom: 1px solid transparent;
+  }
+  #pinned-section > summary::-webkit-details-marker { display: none; }
+  #pinned-section > summary:hover { background: var(--bg); }
+  #pinned-section[open] > summary { border-bottom-color: var(--accent-br); }
+  #pinned-section[open] > summary .chev { transform: rotate(45deg); }
+  .pinned-label { font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: var(--accent); }
+  .pinned-count-badge { margin-left: auto; background: var(--accent-br); color: var(--accent); padding: 1px 6px; border-radius: 999px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; font-weight: 600; }
+  #pinned-body { margin: 8px 10px 10px; background: var(--bg-card); border: 1px solid var(--accent-br); border-radius: 7px; padding: 4px 0; overflow: hidden; }
+  .pinned-empty { font-family: var(--mono); font-size: 11px; color: var(--ink-3); padding: 6px 16px 4px; }
+  #pinned-body .rule-group { border-bottom: 1px solid var(--accent-br); }
+  #pinned-body .rule-group:last-child { border-bottom: none; }
+  #pinned-body .rule-group > summary { background: transparent; }
+  #pinned-body .rule-group > summary:hover { background: rgba(0,0,0,0.03); }
+  #pinned-body .run-entry:hover  { background: rgba(0,0,0,0.04); }
+  #pinned-body .run-entry.active { background: rgba(0,0,0,0.07); }
+
+  /* Sim page filter */
+  .sim-filter-outer { padding: 8px 10px; border-bottom: 1px solid var(--rule); flex: 0 0 auto; }
+  #sim-filter {
+    width: 100%; padding: 8px 10px 8px 30px; border: 1px solid var(--rule);
+    background: var(--bg-card); border-radius: 6px; font-family: var(--mono);
+    font-size: 12px; color: var(--ink); outline: none; transition: border-color 120ms, background 120ms;
+  }
+  #sim-filter::placeholder { color: var(--ink-3); }
+  #sim-filter:focus { border-color: var(--accent-br); }
+  #session-count { background: var(--rule-soft); color: var(--ink-2); padding: 1px 6px; border-radius: 999px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em; font-weight: 500; }
+
+  /* Rule group context menu */
+  .rule-menu-wrap { position: relative; }
+  .rule-menu-btn {
+    width: 22px; height: 22px; border: none; background: none; cursor: pointer;
+    color: var(--ink-3); font-size: 15px; display: flex; align-items: center;
+    justify-content: center; border-radius: 4px; padding: 0; line-height: 1;
+    transition: background 100ms, color 100ms; opacity: 0;
+  }
+  .rule-group > summary:hover .rule-menu-btn,
+  .rule-menu-btn:focus { opacity: 1; }
+  .rule-menu-btn:hover { background: rgba(0,0,0,0.07); color: var(--ink); }
+
+  /* Run entry context menu */
+  .run-menu-wrap { position: relative; }
+  .run-menu-btn {
+    width: 22px; height: 22px; border: none; background: none; cursor: pointer;
+    color: var(--ink-3); font-size: 15px; display: flex; align-items: center;
+    justify-content: center; border-radius: 4px; padding: 0; line-height: 1;
+    transition: background 100ms, color 100ms; opacity: 0;
+  }
+  .run-entry:hover .run-menu-btn,
+  .run-entry.active .run-menu-btn,
+  .run-menu-btn:focus { opacity: 1; }
+  .run-menu-btn:hover { background: rgba(0,0,0,0.07); color: var(--ink); }
+
+  /* Shared context popup */
+  .ctx-popup {
+    display: none; position: absolute; right: 0; top: calc(100% + 2px);
+    background: var(--bg-card); border: 1px solid var(--rule); border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.10); min-width: 130px; z-index: 300; padding: 4px 0;
+  }
+  .ctx-popup.open { display: block; }
+  .ctx-popup-item {
+    display: block; width: 100%; text-align: left; padding: 7px 14px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+    background: none; border: none; cursor: pointer; transition: background 80ms;
+  }
+  .ctx-popup-item:hover { background: var(--bg-sunk); color: var(--ink); }
+  .ctx-popup-item.danger { color: oklch(42% 0.14 22); }
+  .ctx-popup-item.danger:hover { background: oklch(96% 0.025 22); color: oklch(42% 0.14 22); }
+  .ctx-popup-item:disabled { opacity: 0.45; cursor: default; pointer-events: none; }
+  .ctx-popup-sep { height: 1px; background: var(--rule); margin: 4px 0; }
 </style>
 </head>
 <body class="sidebar-open">
@@ -373,6 +454,14 @@
           <input id="filter" placeholder="Filter…" autocomplete="off" spellcheck="false">
         </div>
       </div>
+      <details id="pinned-section" style="display:none">
+        <summary>
+          <span class="chev" aria-hidden="true"></span>
+          <span class="pinned-label">Pinned</span>
+          <span class="pinned-count-badge" id="pinned-count">0</span>
+        </summary>
+        <div id="pinned-body"></div>
+      </details>
       <nav id="run-list"></nav>
     </div>
 
@@ -437,6 +526,12 @@
       <div id="sim-session-section">
         <div class="sb-section-head">
           <span class="sb-section-title">This session</span>
+          <span id="session-count" style="display:none">0</span>
+        </div>
+        <div class="sim-filter-outer">
+          <div class="filter-wrap">
+            <input id="sim-filter" placeholder="Filter…" autocomplete="off" spellcheck="false">
+          </div>
         </div>
         <div id="sim-session-list">
           <div class="session-empty" id="session-empty">No runs yet.</div>
@@ -446,7 +541,7 @@
 
   </div>
 </aside>
-
+<div id="resizer"></div>
 <main id="main">
   <header class="topbar">
     <button id="toggle" title="Toggle sidebar" aria-label="Toggle sidebar">
@@ -553,7 +648,29 @@
   let curMeta = null;
   let curTiles = [];
   let activeEl = null;
+  let activeFilename = null;
   const sessionRuns = {};
+  let allEntries = [];
+
+  // ── Pin state (persisted) ─────────────────────────────────────────────────
+  let pinnedRules = new Set(JSON.parse(localStorage.getItem('ca-pinned-rules') || '[]'));
+  let pinnedRuns  = new Set(JSON.parse(localStorage.getItem('ca-pinned-runs')  || '[]'));
+
+  function savePins() {
+    localStorage.setItem('ca-pinned-rules', JSON.stringify([...pinnedRules]));
+    localStorage.setItem('ca-pinned-runs',  JSON.stringify([...pinnedRuns]));
+  }
+  function togglePinRule(rule) {
+    if (pinnedRules.has(rule)) pinnedRules.delete(rule); else pinnedRules.add(rule);
+    savePins(); buildSidebar(allEntries);
+  }
+  function togglePinRun(filename) {
+    if (pinnedRuns.has(filename)) pinnedRuns.delete(filename); else pinnedRuns.add(filename);
+    savePins(); buildSidebar(allEntries);
+  }
+  function closeAllPopups() {
+    for (const p of document.querySelectorAll('.ctx-popup.open, .session-popup.open')) p.classList.remove('open');
+  }
 
   const esc = (s) => String(s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
@@ -561,6 +678,33 @@
 
   // ── Sidebar toggle ────────────────────────────────────────────────────────
   toggleBtn.addEventListener('click', () => body.classList.toggle('sidebar-open'));
+
+  // ── Sidebar resize ────────────────────────────────────────────────────────
+  const resizer = document.getElementById('resizer');
+  const SIDEBAR_MIN = 180;
+  const SIDEBAR_MAX = 640;
+  const savedSidebarW = localStorage.getItem('ca-sidebar-w');
+  if (savedSidebarW) document.documentElement.style.setProperty('--sidebar-w', savedSidebarW + 'px');
+
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10) || 304;
+    body.classList.add('resizing');
+    const onMove = (ev) => {
+      const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, startW + ev.clientX - startX));
+      document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+    };
+    const onUp = () => {
+      body.classList.remove('resizing');
+      const w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10);
+      localStorage.setItem('ca-sidebar-w', w);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 
   // ── Screen routing ────────────────────────────────────────────────────────
   function showScreen(name) {
@@ -593,25 +737,37 @@
     tilesEl.innerHTML = ''; noteEl.textContent = '';
     if (activeEl) activeEl.classList.remove('active');
     activeEl = null;
+    activeFilename = null;
     vProgress.className = '';
   }
 
   function setActive(el) {
     if (activeEl) activeEl.classList.remove('active');
     activeEl = el;
+    activeFilename = el ? (el.dataset.filename || null) : null;
     if (el) el.classList.add('active');
+  }
+
+  function restoreActiveState() {
+    if (!activeFilename) return;
+    const sel = '[data-filename="' + activeFilename.replace(/"/g, '\\"') + '"]';
+    for (const container of [listEl, document.getElementById('pinned-body')]) {
+      const el = container && container.querySelector(sel);
+      if (el) { activeEl = el; el.classList.add('active'); return; }
+    }
+    activeEl = null;
   }
 
   // ── Naming helpers ────────────────────────────────────────────────────────
   function displayName(e) {
     if (!e.fill && !e.align && !e.ic) return e.filename || String(e.rule);
-    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrapped around ' : '';
+    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
     return (e.generations + ' generations of rule ' + e.rule + ' ' + bnd +
-            'padded ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
+            ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
   }
   function shortName(e) {
-    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap ' : '';
-    return e.generations + ' gens · ' + bnd + 'padded ' + e.fill + ' ' + e.align + ' ' + e.ic;
+    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
+    return e.generations + ' gens · ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic;
   }
 
   // ── Sort ──────────────────────────────────────────────────────────────────
@@ -627,8 +783,177 @@
     });
   }
 
+  // ── Run entry builder ─────────────────────────────────────────────────────
+  function createSavedRunEntry(e) {
+    const isPinned = pinnedRuns.has(e.filename);
+    const row = document.createElement('div');
+    row.className = 'run-entry' + (isPinned ? ' is-pinned' : '');
+    row.setAttribute('data-filename', e.filename);
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'run-name';
+    nameSpan.textContent = 'Rule ' + String(e.rule).padStart(3, '0') + ' · ' + shortName(e);
+
+    const metaSpan = document.createElement('span');
+    metaSpan.className = 'run-meta';
+    metaSpan.textContent = '#' + e.id;
+
+    const menuWrap = document.createElement('div');
+    menuWrap.className = 'run-menu-wrap';
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'run-menu-btn';
+    menuBtn.type = 'button';
+    menuBtn.textContent = '⋮';
+    menuBtn.title = 'Options';
+
+    const popup = document.createElement('div');
+    popup.className = 'ctx-popup run-popup';
+
+    const openItem = document.createElement('button');
+    openItem.className = 'ctx-popup-item';
+    openItem.type = 'button';
+    openItem.textContent = 'Open';
+
+    const pinItem = document.createElement('button');
+    pinItem.className = 'ctx-popup-item';
+    pinItem.type = 'button';
+    pinItem.textContent = isPinned ? 'Unpin' : 'Pin';
+
+    const sep = document.createElement('div');
+    sep.className = 'ctx-popup-sep';
+
+    const delItem = document.createElement('button');
+    delItem.className = 'ctx-popup-item danger';
+    delItem.type = 'button';
+    delItem.textContent = 'Delete';
+
+    openItem.addEventListener('click', (ev) => { ev.stopPropagation(); closeAllPopups(); loadSavedRun(e, row); });
+    pinItem.addEventListener('click',  (ev) => { ev.stopPropagation(); closeAllPopups(); togglePinRun(e.filename); });
+    delItem.addEventListener('click',  (ev) => { ev.stopPropagation(); closeAllPopups(); deleteSaved(e.filename); });
+    menuBtn.addEventListener('click',  (ev) => {
+      ev.stopPropagation();
+      const wasOpen = popup.classList.contains('open');
+      closeAllPopups();
+      if (!wasOpen) popup.classList.add('open');
+    });
+
+    popup.appendChild(openItem);
+    popup.appendChild(pinItem);
+    popup.appendChild(sep);
+    popup.appendChild(delItem);
+    menuWrap.appendChild(menuBtn);
+    menuWrap.appendChild(popup);
+    row.appendChild(nameSpan);
+    row.appendChild(metaSpan);
+    row.appendChild(menuWrap);
+    row.addEventListener('click', () => loadSavedRun(e, row));
+    return row;
+  }
+
+  // ── Rule group builder (shared by main list and pinned section) ───────────
+  function createRuleGroup(rule, ruleEntries, isPinnedGroup) {
+    const isPinned = pinnedRules.has(rule);
+    const det = document.createElement('details');
+    // is-pinned class only on main list entries, not the pinned section itself
+    det.className = 'rule-group' + (isPinned && !isPinnedGroup ? ' is-pinned' : '');
+    det.open = !!isPinnedGroup; // open in pinned section, closed in main list
+
+    const sum = document.createElement('summary');
+    sum.innerHTML =
+      '<span class="chev" aria-hidden="true"></span>' +
+      '<span class="rule-label">Rule</span>' +
+      '<span class="rule-num">' + esc(String(rule).padStart(3, '0')) + '</span>' +
+      '<span class="rule-count">' + ruleEntries.length + '</span>';
+
+    const menuWrap = document.createElement('span');
+    menuWrap.className = 'rule-menu-wrap';
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'rule-menu-btn';
+    menuBtn.type = 'button';
+    menuBtn.textContent = '⋮';
+    menuBtn.title = 'Rule options';
+
+    const popup = document.createElement('div');
+    popup.className = 'ctx-popup rule-popup';
+
+    const pinItem = document.createElement('button');
+    pinItem.className = 'ctx-popup-item';
+    pinItem.type = 'button';
+    pinItem.textContent = isPinned ? 'Unpin rule' : 'Pin rule';
+
+    const ruleSep = document.createElement('div');
+    ruleSep.className = 'ctx-popup-sep';
+
+    const delRuleItem = document.createElement('button');
+    delRuleItem.className = 'ctx-popup-item danger';
+    delRuleItem.type = 'button';
+    delRuleItem.textContent = 'Delete rule';
+
+    pinItem.addEventListener('click', (ev) => { ev.stopPropagation(); closeAllPopups(); togglePinRule(rule); });
+    delRuleItem.addEventListener('click', (ev) => { ev.stopPropagation(); closeAllPopups(); deleteRule(rule, ruleEntries); });
+    menuBtn.addEventListener('click', (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      const wasOpen = popup.classList.contains('open');
+      closeAllPopups();
+      if (!wasOpen) popup.classList.add('open');
+    });
+
+    popup.appendChild(pinItem);
+    popup.appendChild(ruleSep);
+    popup.appendChild(delRuleItem);
+    menuWrap.appendChild(menuBtn);
+    menuWrap.appendChild(popup);
+    sum.appendChild(menuWrap);
+    det.appendChild(sum);
+
+    const grpBody = document.createElement('div');
+    grpBody.className = 'group-body';
+    for (const e of ruleEntries) grpBody.appendChild(createSavedRunEntry(e));
+    det.appendChild(grpBody);
+    return det;
+  }
+
+  // ── Pinned section ────────────────────────────────────────────────────────
+  function buildPinnedSection(entries) {
+    const pinnedBodyEl  = document.getElementById('pinned-body');
+    const pinnedCountEl = document.getElementById('pinned-count');
+    const pinnedSection = document.getElementById('pinned-section');
+    pinnedBodyEl.innerHTML = '';
+
+    const byRule = new Map();
+    for (const e of entries) {
+      const r = parseInt(e.rule, 10);
+      if (!byRule.has(r)) byRule.set(r, []);
+      byRule.get(r).push(e);
+    }
+
+    let count = 0;
+
+    for (const rule of [...pinnedRules].sort((a, b) => a - b)) {
+      const ruleEntries = sortRuns(byRule.get(rule) || []);
+      if (!ruleEntries.length) continue;
+      pinnedBodyEl.appendChild(createRuleGroup(rule, ruleEntries, true));
+      count += ruleEntries.length;
+    }
+
+    for (const filename of pinnedRuns) {
+      const e = entries.find(x => x.filename === filename);
+      if (!e || pinnedRules.has(parseInt(e.rule, 10))) continue;
+      pinnedBodyEl.appendChild(createSavedRunEntry(e));
+      count++;
+    }
+
+    pinnedCountEl.textContent = count;
+    pinnedSection.style.display = count > 0 ? '' : 'none';
+  }
+
   // ── Saved-runs sidebar ────────────────────────────────────────────────────
   function buildSidebar(entries) {
+    allEntries = entries;
+    buildPinnedSection(entries);
+
     const groups = new Map();
     for (const e of entries) {
       const r = parseInt(e.rule, 10);
@@ -642,59 +967,15 @@
     for (const rule of rules) {
       const ruleEntries = sortRuns(groups.get(rule));
       total += ruleEntries.length;
-
-      const det = document.createElement('details');
-      det.className = 'rule-group';
-      det.open = true;
-
-      const sum = document.createElement('summary');
-      sum.innerHTML =
-        '<span class="chev" aria-hidden="true"></span>' +
-        '<span class="rule-label">Rule</span>' +
-        '<span class="rule-num">' + esc(String(rule).padStart(3, '0')) + '</span>' +
-        '<span class="rule-count">' + ruleEntries.length + '</span>';
-      det.appendChild(sum);
-
-      const grpBody = document.createElement('div');
-      grpBody.className = 'group-body';
-      for (const e of ruleEntries) {
-        const row = document.createElement('div');
-        row.className = 'run-entry';
-        row.setAttribute('data-filename', e.filename);
-
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'run-name';
-        nameSpan.textContent = shortName(e);
-
-        const metaSpan = document.createElement('span');
-        metaSpan.className = 'run-meta';
-        metaSpan.textContent = '#' + e.id;
-
-        const delBtn = document.createElement('button');
-        delBtn.className = 'btn-sm danger';
-        delBtn.textContent = 'Del';
-        delBtn.title = 'Delete saved run permanently';
-        delBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          deleteSaved(e.filename, row);
-        });
-
-        row.appendChild(nameSpan);
-        row.appendChild(metaSpan);
-        row.appendChild(delBtn);
-        row.addEventListener('click', () => loadSavedRun(e, row));
-        grpBody.appendChild(row);
-      }
-      det.appendChild(grpBody);
-      listEl.appendChild(det);
+      listEl.appendChild(createRuleGroup(rule, ruleEntries, false));
     }
     countEl.textContent = total;
+    restoreActiveState();
   }
 
   // ── Filter ────────────────────────────────────────────────────────────────
-  filterEl.addEventListener('input', () => {
-    const term = filterEl.value.toLowerCase().trim();
-    const groups = listEl.querySelectorAll('details.rule-group');
+  function applyFilter(term, container) {
+    const groups = container.querySelectorAll('details.rule-group');
     for (const g of groups) {
       const items = g.querySelectorAll('.run-entry');
       let any = false;
@@ -705,6 +986,24 @@
       }
       g.style.display = any ? '' : 'none';
       if (term && any) g.open = true;
+    }
+    for (const it of container.querySelectorAll(':scope > .run-entry')) {
+      it.style.display = (!term || it.textContent.toLowerCase().includes(term)) ? '' : 'none';
+    }
+  }
+
+  filterEl.addEventListener('input', () => {
+    const term = filterEl.value.toLowerCase().trim();
+    applyFilter(term, listEl);
+    const pinnedBody = document.getElementById('pinned-body');
+    if (pinnedBody) applyFilter(term, pinnedBody);
+  });
+
+  // ── Sim session filter ────────────────────────────────────────────────────
+  document.getElementById('sim-filter').addEventListener('input', function () {
+    const term = this.value.toLowerCase().trim();
+    for (const entry of simSessionListEl.querySelectorAll('.session-entry')) {
+      entry.style.display = (!term || entry.textContent.toLowerCase().includes(term)) ? '' : 'none';
     }
   });
 
@@ -865,7 +1164,7 @@
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'session-name';
-    nameSpan.textContent = '#' + data.id + ' rule ' + data.rule;
+    nameSpan.textContent = 'Rule ' + String(data.rule).padStart(3, '0') + ' · ' + shortName(data);
 
     const menuWrap = document.createElement('div');
     menuWrap.className = 'session-menu-wrap';
@@ -938,6 +1237,7 @@
     sessionRuns[data.id] = { ...entry, entryEl, saveItem };
     sessionEmptyEl.style.display = 'none';
     simSessionListEl.appendChild(entryEl);
+    updateSessionCount();
 
     entryEl.click();
   }
@@ -971,26 +1271,40 @@
     await fetch('/api/runs/' + id, { method: 'DELETE' });
     delete sessionRuns[id];
     entryEl.remove();
-    if (activeEl === entryEl) {
-      clearViewer();
-    }
-    if (Object.keys(sessionRuns).length === 0) {
-      sessionEmptyEl.style.display = '';
-    }
+    if (activeEl === entryEl) clearViewer();
+    updateSessionCount();
+    if (Object.keys(sessionRuns).length === 0) sessionEmptyEl.style.display = '';
+  }
+
+  function updateSessionCount() {
+    const n = Object.keys(sessionRuns).length;
+    const el = document.getElementById('session-count');
+    if (!el) return;
+    el.textContent = n;
+    el.style.display = n > 0 ? '' : 'none';
   }
 
   // ── Saved-run delete ──────────────────────────────────────────────────────
-  async function deleteSaved(filename, entryEl) {
+  async function deleteSaved(filename) {
     try {
       const resp = await fetch('/api/saved/' + encodeURIComponent(filename), { method: 'DELETE' });
       if (!resp.ok) return;
     } catch { return; }
-    entryEl.remove();
-    const remaining = listEl.querySelectorAll('.run-entry').length;
-    countEl.textContent = remaining;
-    for (const det of listEl.querySelectorAll('details.rule-group')) {
-      if (det.querySelectorAll('.run-entry').length === 0) det.remove();
-    }
+    if (activeFilename === filename) clearViewer();
+    pinnedRuns.delete(filename);
+    savePins();
+    await refreshSavedSidebar();
+  }
+
+  async function deleteRule(rule, ruleEntries) {
+    await Promise.all(ruleEntries.map(e =>
+      fetch('/api/saved/' + encodeURIComponent(e.filename), { method: 'DELETE' }).catch(() => {})
+    ));
+    if (ruleEntries.some(e => e.filename === activeFilename)) clearViewer();
+    for (const e of ruleEntries) pinnedRuns.delete(e.filename);
+    pinnedRules.delete(rule);
+    savePins();
+    await refreshSavedSidebar();
   }
 
   // ── Manifest / refresh ────────────────────────────────────────────────────
@@ -1083,19 +1397,22 @@
   });
 
   // ── Global popup close ────────────────────────────────────────────────────
-  document.addEventListener('click', () => {
-    for (const p of document.querySelectorAll('.session-popup.open')) p.classList.remove('open');
-  });
-  document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') {
-      for (const p of document.querySelectorAll('.session-popup.open')) p.classList.remove('open');
-    }
-  });
+  document.addEventListener('click', () => closeAllPopups());
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeAllPopups(); });
 
   // ── Init ──────────────────────────────────────────────────────────────────
   async function init() {
     body.classList.add('sidebar-open');
     showScreen('home');
+
+    // Restore pinned section open/close state
+    const pinnedSection = document.getElementById('pinned-section');
+    const savedPinnedOpen = localStorage.getItem('ca-pinned-open');
+    if (savedPinnedOpen !== null) pinnedSection.open = savedPinnedOpen !== 'false';
+    pinnedSection.addEventListener('toggle', () => {
+      localStorage.setItem('ca-pinned-open', pinnedSection.open);
+    });
+
     await refreshSavedSidebar();
     autoLoadFromHash();
   }
