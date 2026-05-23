@@ -4,3 +4,14 @@
 /samples/runs/
 **/.claude/
 *.pdb
+
+# Runtime logs
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Rust backup files
+*.rs.bk
