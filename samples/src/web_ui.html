@@ -1,0 +1,1107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cellular Automata</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #f6f4ef;
+    --bg-sunk:   #efece5;
+    --bg-card:   #fbfaf6;
+    --ink:       #1a1816;
+    --ink-2:     #4a4641;
+    --ink-3:     #8a847b;
+    --rule:      #d9d3c4;
+    --rule-soft: #e6e1d2;
+    --accent:    oklch(54% 0.14 35);
+    --accent-bg: oklch(96% 0.025 35);
+    --accent-br: oklch(82% 0.06 35);
+    --sans: "IBM Plex Sans", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sidebar-w: 304px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    display: grid;
+    grid-template-columns: 0px 1fr;
+    grid-template-rows: 100%;
+    transition: grid-template-columns 260ms cubic-bezier(.4,.0,.2,1);
+    overflow: hidden;
+  }
+  body.sidebar-open { grid-template-columns: var(--sidebar-w) 1fr; }
+  aside#sidebar {
+    overflow: hidden;
+    background: var(--bg-sunk);
+    border-right: 1px solid var(--rule);
+    display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .sidebar-inner { width: var(--sidebar-w); height: 100%; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+
+  /* Sidebar section headers */
+  .sb-section-head { padding: 10px 16px 8px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--rule); }
+  .sb-section-title { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; color: var(--ink-3); text-transform: uppercase; margin: 0; }
+
+  /* Home sidebar */
+  #home-sidebar { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  .sidebar-head { padding: 10px 16px 10px; border-bottom: 1px solid var(--rule); flex: 0 0 auto; }
+  .sb-title {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em;
+    color: var(--ink-3); text-transform: uppercase; margin: 0 0 10px 0;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .sb-title .count { background: var(--rule-soft); color: var(--ink-2); padding: 1px 6px; border-radius: 999px; letter-spacing: 0.04em; font-weight: 500; }
+  .filter-wrap { position: relative; }
+  #filter {
+    width: 100%; padding: 8px 10px 8px 30px; border: 1px solid var(--rule);
+    background: var(--bg-card); border-radius: 6px; font-family: var(--mono);
+    font-size: 12px; color: var(--ink); outline: none; transition: border-color 120ms, background 120ms;
+  }
+  #filter::placeholder { color: var(--ink-3); }
+  #filter:focus { border-color: var(--accent-br); }
+  .filter-wrap::before {
+    content: ""; position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    width: 12px; height: 12px; border: 1.5px solid var(--ink-3); border-radius: 50%;
+  }
+  .filter-wrap::after {
+    content: ""; position: absolute; left: 19px; top: calc(50% + 4px);
+    width: 6px; height: 1.5px; background: var(--ink-3);
+    transform: rotate(45deg); transform-origin: left top;
+  }
+  nav#run-list { flex: 1 1 auto; overflow-y: auto; padding: 4px 0 24px; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+  nav#run-list::-webkit-scrollbar { width: 8px; }
+  nav#run-list::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 999px; }
+  .rule-group { border-bottom: 1px solid var(--rule); }
+  .rule-group > summary {
+    list-style: none; cursor: pointer; padding: 11px 16px 10px;
+    display: flex; align-items: center; gap: 10px; user-select: none;
+    background: transparent; transition: background 120ms;
+  }
+  .rule-group > summary::-webkit-details-marker { display: none; }
+  .rule-group > summary:hover { background: rgba(0,0,0,0.025); }
+  .chev {
+    width: 9px; height: 9px; border-right: 1.5px solid var(--ink-2);
+    border-bottom: 1.5px solid var(--ink-2); transform: rotate(-45deg);
+    transition: transform 160ms; flex: 0 0 auto;
+  }
+  .rule-group[open] > summary .chev { transform: rotate(45deg); }
+  .rule-label { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink); }
+  .rule-num { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .rule-count { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.04em; }
+  .group-body { padding: 0 8px 8px; }
+  .run-entry {
+    display: grid; grid-template-columns: 1fr auto auto; align-items: center;
+    column-gap: 6px; padding: 7px 10px 8px 10px; margin: 1px 0;
+    border-radius: 7px; cursor: pointer; transition: background 100ms;
+  }
+  .run-entry:hover { background: rgba(0,0,0,0.04); }
+  .run-entry.active { background: rgba(0,0,0,0.07); }
+  .run-name { font-family: var(--mono); font-size: 11.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .run-meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.02em; }
+  .run-entry.active .run-name { font-weight: 600; }
+
+  /* Sim sidebar */
+  #sim-sidebar { flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; display: none; }
+  .sim-form {
+    flex: 0 0 auto; padding: 12px 14px 16px; display: flex; flex-direction: column;
+    gap: 8px; border-bottom: 1px solid var(--rule);
+  }
+  .sim-form .form-field input[type="text"],
+  .sim-form .form-field input[type="number"],
+  .sim-form .form-field select { width: 100%; }
+  .sim-form #run-btn { width: 100%; margin-top: 4px; }
+  .sim-form #form-error { flex-basis: auto; }
+  #sim-session-list { padding: 0 8px 12px; }
+
+  /* Session entries */
+  .session-entry {
+    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    column-gap: 4px; padding: 6px 8px 6px 10px; margin: 1px 0;
+    border-radius: 7px; cursor: pointer; transition: background 100ms;
+  }
+  .session-entry:hover { background: rgba(0,0,0,0.04); }
+  .session-entry.active { background: rgba(0,0,0,0.07); }
+  .session-name { font-family: var(--mono); font-size: 11.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .session-entry.active .session-name { font-weight: 600; }
+  .session-empty { font-family: var(--mono); font-size: 11px; color: var(--ink-3); padding: 8px 10px 4px 18px; }
+
+  /* Kebab menu */
+  .session-menu-wrap { position: relative; }
+  .session-menu-btn {
+    width: 26px; height: 26px; border: none; background: none; cursor: pointer;
+    color: var(--ink-3); font-size: 15px; display: flex; align-items: center;
+    justify-content: center; border-radius: 4px;
+    transition: background 100ms, color 100ms; opacity: 0;
+  }
+  .session-entry:hover .session-menu-btn,
+  .session-entry.active .session-menu-btn,
+  .session-menu-btn:focus { opacity: 1; }
+  .session-menu-btn:hover { background: rgba(0,0,0,0.06); color: var(--ink); }
+  .session-popup {
+    display: none; position: absolute; right: 0; top: calc(100% + 2px);
+    background: var(--bg-card); border: 1px solid var(--rule); border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.10); min-width: 120px; z-index: 200; padding: 4px 0;
+  }
+  .session-popup.open { display: block; }
+  .session-popup-item {
+    display: block; width: 100%; text-align: left; padding: 7px 14px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+    background: none; border: none; cursor: pointer; transition: background 80ms;
+  }
+  .session-popup-item:hover { background: var(--bg-sunk); color: var(--ink); }
+  .session-popup-item.danger { color: oklch(42% 0.14 22); }
+  .session-popup-item.danger:hover { background: oklch(96% 0.025 22); color: oklch(42% 0.14 22); }
+  .session-popup-item:disabled { opacity: 0.45; cursor: default; pointer-events: none; }
+
+  /* Shared small button */
+  .btn-sm {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+    padding: 2px 6px; border: 1px solid var(--rule); border-radius: 4px;
+    background: var(--bg-card); color: var(--ink-2); cursor: pointer;
+    white-space: nowrap; transition: background 100ms, border-color 100ms;
+    line-height: 1.4;
+  }
+  .btn-sm:hover { background: var(--bg-sunk); border-color: var(--ink-3); }
+  .btn-sm:disabled { opacity: 0.45; cursor: default; pointer-events: none; }
+  .btn-sm.danger { color: oklch(42% 0.14 22); border-color: oklch(80% 0.06 22); }
+  .btn-sm.danger:hover { background: oklch(96% 0.025 22); }
+
+  /* Main layout */
+  main#main { min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--bg); }
+  header.topbar {
+    flex: 0 0 auto; height: 52px; border-bottom: 1px solid var(--rule);
+    background: var(--bg); display: flex; align-items: center; gap: 14px; padding: 0 20px 0 14px;
+  }
+  #toggle {
+    width: 32px; height: 32px; border: 1px solid var(--rule); background: var(--bg-card);
+    border-radius: 6px; cursor: pointer; padding: 0; display: grid; place-items: center;
+    transition: background 120ms, border-color 120ms;
+  }
+  #toggle:hover { background: var(--bg-sunk); border-color: var(--ink-3); }
+  #toggle svg { display: block; }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink); }
+  .brand .mark { width: 18px; height: 18px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 1px; }
+  .brand .mark i { background: var(--ink); display: block; }
+  .brand .mark i.off { background: transparent; }
+  .topbar .spacer { flex: 1; }
+
+  /* New Simulation / Back buttons */
+  #new-sim-btn {
+    font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+    padding: 6px 14px; border: none; border-radius: 5px;
+    background: var(--ink); color: var(--bg); cursor: pointer;
+    transition: opacity 120ms; line-height: 1.5; text-transform: uppercase;
+  }
+  #new-sim-btn:hover { opacity: 0.82; }
+  #back-btn {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    background: none; border: none; cursor: pointer; padding: 0;
+    letter-spacing: 0.06em; line-height: 1.5;
+    text-decoration: underline; text-decoration-style: dotted;
+    text-underline-offset: 3px; transition: color 120ms;
+  }
+  #back-btn:hover { color: var(--ink); }
+
+  /* Run form fields */
+  .form-field { display: flex; flex-direction: column; gap: 2px; }
+  .form-label { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink-3); }
+  .form-field input[type="text"],
+  .form-field input[type="number"],
+  .form-field select {
+    font-family: var(--mono); font-size: 12px; color: var(--ink);
+    background: var(--bg-card); border: 1px solid var(--rule); border-radius: 5px;
+    padding: 4px 6px; outline: none; transition: border-color 120ms;
+  }
+  .form-field input[type="text"]:focus,
+  .form-field input[type="number"]:focus,
+  .form-field select:focus { border-color: var(--accent-br); }
+  .form-check { display: flex; align-items: center; gap: 6px; cursor: pointer; align-self: flex-start; padding: 2px 0; }
+  .form-check input { position: absolute; opacity: 0; }
+  .form-check .box { width: 14px; height: 14px; border: 1.5px solid var(--ink-3); border-radius: 3px; display: grid; place-items: center; background: var(--bg-card); transition: border-color 120ms, background 120ms; flex-shrink: 0; }
+  .form-check input:checked + .box { background: var(--ink); border-color: var(--ink); }
+  .form-check input:checked + .box::after { content: ""; width: 7px; height: 4px; border-left: 1.5px solid var(--bg); border-bottom: 1.5px solid var(--bg); transform: translateY(-1px) rotate(-45deg); }
+  .form-check .lbl { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+
+  /* Sim form design overhaul */
+  .sim-section-head {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-3);
+    display: flex; align-items: center; gap: 10px; padding: 6px 0 2px;
+  }
+  .sim-section-head::after { content: ''; flex: 1; height: 1px; background: var(--rule); }
+  .sim-form .form-label { font-size: 9.5px; letter-spacing: 0.12em; color: var(--ink-3); }
+  .sim-form .form-check .lbl { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+  .boundary-toggle { display: flex; }
+  .boundary-btn {
+    flex: 1; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em;
+    padding: 5px 0; border: 1px solid var(--rule); background: var(--bg-card);
+    color: var(--ink-2); cursor: pointer; transition: background 100ms, color 100ms;
+    line-height: 1.4; text-align: center;
+  }
+  .boundary-btn:first-child { border-radius: 4px 0 0 4px; }
+  .boundary-btn:last-child  { border-radius: 0 4px 4px 0; border-left: 0; }
+  .boundary-btn.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .run-row { display: flex; gap: 8px; margin-top: 4px; }
+  #run-btn {
+    flex: 1; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 7px 12px; border: none; border-radius: 3px;
+    background: var(--ink); color: var(--bg-card); cursor: pointer;
+    transition: opacity 120ms; line-height: 1.5;
+  }
+  #run-btn:hover { opacity: 0.85; }
+  #run-btn:disabled { opacity: 0.45; cursor: default; }
+  #reset-btn {
+    flex-shrink: 0; font-family: var(--mono); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 7px 12px; border: 1px solid var(--rule); border-radius: 3px;
+    background: transparent; color: var(--ink-2); cursor: pointer;
+    transition: background 120ms, border-color 120ms; line-height: 1.5;
+  }
+  #reset-btn:hover { background: var(--bg-sunk); border-color: var(--ink-3); color: var(--ink); }
+  #form-error {
+    font-family: var(--mono); font-size: 11px;
+    color: oklch(42% 0.14 22); display: none;
+  }
+
+  /* Progress bar */
+  #v-title-group { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; max-width: 280px; }
+  #v-title-row   { display: flex; align-items: center; gap: 8px; }
+  #v-progress {
+    height: 2px; width: 100%; background: transparent;
+    border-radius: 999px; overflow: hidden; position: relative;
+  }
+  #v-progress.loading { background: var(--rule-soft); }
+  #v-progress.done    { background: oklch(82% 0.07 145); }
+  @keyframes progress-sweep {
+    0%   { left: -40%; width: 40%; }
+    100% { left: 110%; width: 40%; }
+  }
+  #v-progress.loading::after {
+    content: ''; position: absolute; top: 0; height: 100%;
+    background: oklch(46% 0.12 145); border-radius: 999px;
+    animation: progress-sweep 1.2s ease-in-out infinite;
+  }
+  #v-progress.done::after {
+    content: ''; display: block; height: 100%; width: 100%;
+    background: oklch(46% 0.12 145); border-radius: 999px;
+  }
+
+  /* Viewer bar */
+  #viewer-bar {
+    display: none; flex: 0 0 auto; align-items: center; flex-wrap: wrap;
+    gap: 6px 16px; padding: 8px 20px;
+    border-bottom: 1px solid var(--rule); background: var(--bg-card);
+  }
+  body.has-run #viewer-bar { display: flex; }
+  #v-tag {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent); flex-shrink: 0;
+  }
+  #v-title {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  #v-meta-bar { display: flex; gap: 0 16px; margin: 0; align-items: center; flex-wrap: wrap; }
+  .vbar-cell { display: flex; flex-direction: column; gap: 1px; }
+  .vbar-cell dt { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin: 0; }
+  .vbar-cell dd { font-family: var(--mono); font-size: 12px; color: var(--ink); margin: 0; font-weight: 500; }
+  .vbar-sep { width: 1px; height: 24px; background: var(--rule); flex-shrink: 0; }
+  .vbar-ctrl { display: flex; align-items: center; gap: 6px; }
+  .vbar-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100px; background: transparent; height: 16px; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 2px; background: var(--rule); border-radius: 999px; }
+  input[type="range"]::-moz-range-track { height: 2px; background: var(--rule); border-radius: 999px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: var(--ink); border-radius: 50%; margin-top: -6px; cursor: pointer; transition: background 120ms; }
+  input[type="range"]::-webkit-slider-thumb:hover { background: var(--accent); }
+  input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; background: var(--ink); border: 0; border-radius: 50%; cursor: pointer; }
+  #cs-num { width: 48px; padding: 3px 5px; border: 1px solid var(--rule); background: var(--bg-card); border-radius: 5px; font-family: var(--mono); font-size: 12px; color: var(--ink); outline: none; text-align: right; }
+  #cs-num:focus { border-color: var(--accent-br); }
+  .check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+  .check input { position: absolute; opacity: 0; }
+  .check .box { width: 14px; height: 14px; border: 1.5px solid var(--ink-3); border-radius: 3px; display: grid; place-items: center; background: var(--bg-card); transition: border-color 120ms, background 120ms; }
+  .check input:checked + .box { background: var(--ink); border-color: var(--ink); }
+  .check input:checked + .box::after { content: ""; width: 7px; height: 4px; border-left: 1.5px solid var(--bg); border-bottom: 1.5px solid var(--bg); transform: translateY(-1px) rotate(-45deg); }
+  .check .lbl { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+  #v-file { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); margin-left: auto; }
+
+  /* Content and canvas */
+  #content { flex: 1 1 auto; overflow: hidden; padding: 0; display: flex; flex-direction: column; }
+  #empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--ink-3); text-align: center; gap: 18px; }
+  #empty .grid-deco {
+    width: 220px; aspect-ratio: 1;
+    background-image: linear-gradient(var(--rule) 1px, transparent 1px), linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 11px 11px; opacity: 0.55;
+    mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+  }
+  #empty .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+  #empty .hint { font-family: var(--sans); font-size: 14px; color: var(--ink-2); max-width: 340px; }
+  #canvas-area { display: none; flex: 1 1 auto; overflow: auto; padding: 20px 24px; }
+  body.has-run #canvas-area { display: block; }
+  body.has-run #empty       { display: none; }
+  #tile-note { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 10px; }
+  #tiles { display: flex; flex-direction: column; align-items: flex-start; }
+  #tiles canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; background: white; box-shadow: 0 0 0 1px var(--rule); max-width: none; height: auto; }
+  .err-box { margin-top: 18px; padding: 14px 16px; border: 1px dashed oklch(70% 0.12 35); background: oklch(96% 0.03 35); border-radius: 8px; font-family: var(--mono); font-size: 12px; color: oklch(40% 0.12 35); line-height: 1.55; }
+</style>
+</head>
+<body class="sidebar-open">
+
+<aside id="sidebar">
+  <div class="sidebar-inner">
+
+    <!-- HOME sidebar: saved runs -->
+    <div id="home-sidebar">
+      <div class="sidebar-head">
+        <div class="sb-title">
+          <span>Saved runs</span>
+          <span class="count" id="total-count">0</span>
+        </div>
+        <div class="filter-wrap">
+          <input id="filter" placeholder="Filter…" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+      <nav id="run-list"></nav>
+    </div>
+
+    <!-- SIM sidebar: form + session list -->
+    <div id="sim-sidebar">
+      <div class="sim-form">
+        <div class="sim-section-head">Simulation</div>
+        <div class="form-field">
+          <span class="form-label">Initial Row</span>
+          <input type="text" id="f-seed" value="0000000001" spellcheck="false">
+        </div>
+        <div class="form-field">
+          <span class="form-label">Rule (0-255)</span>
+          <input type="number" id="f-rule" min="0" max="255" value="102">
+        </div>
+        <div class="form-field">
+          <span class="form-label">Generations</span>
+          <input type="number" id="f-gens" min="0" value="10">
+        </div>
+        <div class="form-field">
+          <span class="form-label">Width</span>
+          <input type="number" id="f-width" min="1" value="10">
+        </div>
+        <div class="form-field">
+          <span class="form-label">Cell Size PX</span>
+          <input type="number" id="f-cs" min="1" max="64" value="4">
+        </div>
+        <div class="form-field">
+          <span class="form-label">Boundary</span>
+          <div class="boundary-toggle">
+            <button type="button" class="boundary-btn active" data-value="ZeroPadded">Padded</button>
+            <button type="button" class="boundary-btn" data-value="Wrap">Wrap-around</button>
+          </div>
+          <input type="hidden" id="f-boundary" value="ZeroPadded">
+        </div>
+        <div class="form-field">
+          <span class="form-label">Padding</span>
+          <select id="f-align">
+            <option value="Before" selected>Before seed</option>
+            <option value="After">After seed</option>
+            <option value="Center">Centered</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <span class="form-label">Fill</span>
+          <select id="f-fill">
+            <option value="Zero" selected>Fill 0s</option>
+            <option value="One">Fill 1s</option>
+          </select>
+        </div>
+        <label class="form-check">
+          <input type="checkbox" id="f-borders">
+          <span class="box"></span>
+          <span class="lbl">Show Cell Borders</span>
+        </label>
+        <div class="run-row">
+          <button id="run-btn">RUN SIMULATION →</button>
+          <button id="reset-btn" type="button">RESET</button>
+        </div>
+        <span id="form-error"></span>
+      </div>
+      <div id="sim-session-section">
+        <div class="sb-section-head">
+          <span class="sb-section-title">This session</span>
+        </div>
+        <div id="sim-session-list">
+          <div class="session-empty" id="session-empty">No runs yet.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</aside>
+
+<main id="main">
+  <header class="topbar">
+    <button id="toggle" title="Toggle sidebar" aria-label="Toggle sidebar">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <rect x="0.75" y="0.75" width="12.5" height="12.5" rx="1.75" stroke="#1a1816" stroke-width="1.5"/>
+        <line x1="5" y1="0.75" x2="5" y2="13.25" stroke="#1a1816" stroke-width="1.5"/>
+        <line x1="7.5" y1="5" x2="11.5" y2="5" stroke="#1a1816" stroke-width="1.25" stroke-linecap="round"/>
+        <line x1="7.5" y1="7" x2="11.5" y2="7" stroke="#1a1816" stroke-width="1.25" stroke-linecap="round"/>
+        <line x1="7.5" y1="9" x2="11.5" y2="9" stroke="#1a1816" stroke-width="1.25" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <i></i><i class="off"></i><i></i>
+        <i></i><i></i><i class="off"></i>
+        <i class="off"></i><i></i><i></i>
+      </span>
+      <span>Cellular Automata</span>
+    </div>
+    <div class="spacer"></div>
+    <button id="back-btn" style="display:none">Open runs gallery →</button>
+    <button id="new-sim-btn">+ New Simulation</button>
+  </header>
+
+  <div id="viewer-bar">
+    <div id="v-title-group">
+      <div id="v-title-row">
+        <span id="v-tag"></span>
+        <span id="v-title"></span>
+      </div>
+      <div id="v-progress"></div>
+    </div>
+    <div class="vbar-sep" aria-hidden="true"></div>
+    <dl id="v-meta-bar"></dl>
+    <div class="vbar-sep" aria-hidden="true"></div>
+    <div class="vbar-ctrl">
+      <label for="cs-range" class="vbar-label">Cell size</label>
+      <input id="cs-range" type="range" min="1" max="16">
+      <input id="cs-num" type="number" min="1" max="64">
+      <span class="vbar-label">px</span>
+    </div>
+    <label class="check">
+      <input id="b-check" type="checkbox">
+      <span class="box"></span>
+      <span class="lbl">Borders</span>
+    </label>
+    <span id="v-file"></span>
+  </div>
+
+  <div id="content">
+    <div id="empty">
+      <div class="grid-deco" aria-hidden="true"></div>
+      <div class="label">No run selected</div>
+      <div class="hint">Open a saved run from the sidebar, or start a new simulation.</div>
+    </div>
+    <div id="canvas-area">
+      <div id="tiles"></div>
+      <div id="tile-note"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── DOM refs ──────────────────────────────────────────────────────────────
+  const body     = document.body;
+  const toggleBtn = document.getElementById('toggle');
+  const filterEl  = document.getElementById('filter');
+  const listEl    = document.getElementById('run-list');
+  const countEl   = document.getElementById('total-count');
+
+  const homeSidebar    = document.getElementById('home-sidebar');
+  const simSidebar     = document.getElementById('sim-sidebar');
+  const newSimBtn      = document.getElementById('new-sim-btn');
+  const backBtn        = document.getElementById('back-btn');
+  const simSessionListEl = document.getElementById('sim-session-list');
+  const sessionEmptyEl   = document.getElementById('session-empty');
+
+  const vTag     = document.getElementById('v-tag');
+  const vTitle   = document.getElementById('v-title');
+  const vMetaBar = document.getElementById('v-meta-bar');
+  const vFile    = document.getElementById('v-file');
+
+  const tilesEl  = document.getElementById('tiles');
+  const noteEl   = document.getElementById('tile-note');
+
+  const csRange  = document.getElementById('cs-range');
+  const csNum    = document.getElementById('cs-num');
+  const bCheck   = document.getElementById('b-check');
+
+  const runBtn        = document.getElementById('run-btn');
+  const resetBtn      = document.getElementById('reset-btn');
+  const formErr       = document.getElementById('form-error');
+  const vProgress     = document.getElementById('v-progress');
+  const boundaryBtns  = document.querySelectorAll('.boundary-btn');
+  const fBoundaryInput = document.getElementById('f-boundary');
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  let currentScreen = 'home';
+  let curCs = 4;
+  let curBorders = false;
+  let curMeta = null;
+  let curTiles = [];
+  let activeEl = null;
+  const sessionRuns = {};
+
+  const esc = (s) => String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  // ── Sidebar toggle ────────────────────────────────────────────────────────
+  toggleBtn.addEventListener('click', () => body.classList.toggle('sidebar-open'));
+
+  // ── Screen routing ────────────────────────────────────────────────────────
+  function showScreen(name) {
+    currentScreen = name;
+    homeSidebar.style.display = name === 'home' ? '' : 'none';
+    simSidebar.style.display  = name === 'sim'  ? 'flex' : 'none';
+    newSimBtn.style.display   = name === 'home' ? '' : 'none';
+    backBtn.style.display     = name === 'sim'  ? '' : 'none';
+    clearViewer();
+  }
+
+  newSimBtn.addEventListener('click', () => showScreen('sim'));
+  backBtn.addEventListener('click',   () => showScreen('home'));
+
+  // ── Boundary toggle ───────────────────────────────────────────────────────
+  function setBoundary(val) {
+    fBoundaryInput.value = val;
+    for (const btn of boundaryBtns) {
+      btn.classList.toggle('active', btn.dataset.value === val);
+    }
+  }
+  for (const btn of boundaryBtns) {
+    btn.addEventListener('click', () => setBoundary(btn.dataset.value));
+  }
+
+  // ── Viewer helpers ────────────────────────────────────────────────────────
+  function clearViewer() {
+    body.classList.remove('has-run');
+    curMeta = null; curTiles = [];
+    tilesEl.innerHTML = ''; noteEl.textContent = '';
+    if (activeEl) activeEl.classList.remove('active');
+    activeEl = null;
+    vProgress.className = '';
+  }
+
+  function setActive(el) {
+    if (activeEl) activeEl.classList.remove('active');
+    activeEl = el;
+    if (el) el.classList.add('active');
+  }
+
+  // ── Naming helpers ────────────────────────────────────────────────────────
+  function displayName(e) {
+    if (!e.fill && !e.align && !e.ic) return e.filename || String(e.rule);
+    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrapped around ' : '';
+    return (e.generations + ' generations of rule ' + e.rule + ' ' + bnd +
+            'padded ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
+  }
+  function shortName(e) {
+    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap ' : '';
+    return e.generations + ' gens · ' + bnd + 'padded ' + e.fill + ' ' + e.align + ' ' + e.ic;
+  }
+
+  // ── Sort ──────────────────────────────────────────────────────────────────
+  function sortRuns(entries) {
+    return entries.slice().sort((a, b) => {
+      const icA = parseInt(a.ic || '0', 10) || 0;
+      const icB = parseInt(b.ic || '0', 10) || 0;
+      if (icA !== icB) return icA - icB;
+      const gA = parseInt(a.generations || '0', 10) || 0;
+      const gB = parseInt(b.generations || '0', 10) || 0;
+      if (gA !== gB) return gA - gB;
+      return String(a.timestamp || '').localeCompare(String(b.timestamp || ''));
+    });
+  }
+
+  // ── Saved-runs sidebar ────────────────────────────────────────────────────
+  function buildSidebar(entries) {
+    const groups = new Map();
+    for (const e of entries) {
+      const r = parseInt(e.rule, 10);
+      if (!groups.has(r)) groups.set(r, []);
+      groups.get(r).push(e);
+    }
+    const rules = Array.from(groups.keys()).sort((a, b) => a - b);
+
+    listEl.innerHTML = '';
+    let total = 0;
+    for (const rule of rules) {
+      const ruleEntries = sortRuns(groups.get(rule));
+      total += ruleEntries.length;
+
+      const det = document.createElement('details');
+      det.className = 'rule-group';
+      det.open = true;
+
+      const sum = document.createElement('summary');
+      sum.innerHTML =
+        '<span class="chev" aria-hidden="true"></span>' +
+        '<span class="rule-label">Rule</span>' +
+        '<span class="rule-num">' + esc(String(rule).padStart(3, '0')) + '</span>' +
+        '<span class="rule-count">' + ruleEntries.length + '</span>';
+      det.appendChild(sum);
+
+      const grpBody = document.createElement('div');
+      grpBody.className = 'group-body';
+      for (const e of ruleEntries) {
+        const row = document.createElement('div');
+        row.className = 'run-entry';
+        row.setAttribute('data-filename', e.filename);
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'run-name';
+        nameSpan.textContent = shortName(e);
+
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'run-meta';
+        metaSpan.textContent = '#' + e.id;
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn-sm danger';
+        delBtn.textContent = 'Del';
+        delBtn.title = 'Delete saved run permanently';
+        delBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          deleteSaved(e.filename, row);
+        });
+
+        row.appendChild(nameSpan);
+        row.appendChild(metaSpan);
+        row.appendChild(delBtn);
+        row.addEventListener('click', () => loadSavedRun(e, row));
+        grpBody.appendChild(row);
+      }
+      det.appendChild(grpBody);
+      listEl.appendChild(det);
+    }
+    countEl.textContent = total;
+  }
+
+  // ── Filter ────────────────────────────────────────────────────────────────
+  filterEl.addEventListener('input', () => {
+    const term = filterEl.value.toLowerCase().trim();
+    const groups = listEl.querySelectorAll('details.rule-group');
+    for (const g of groups) {
+      const items = g.querySelectorAll('.run-entry');
+      let any = false;
+      for (const it of items) {
+        const match = !term || it.textContent.toLowerCase().includes(term);
+        it.style.display = match ? '' : 'none';
+        if (match) any = true;
+      }
+      g.style.display = any ? '' : 'none';
+      if (term && any) g.open = true;
+    }
+  });
+
+  // ── Canvas rendering ──────────────────────────────────────────────────────
+  function bitAt(bin, i) {
+    return (bin.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+  }
+
+  function renderCanvas() {
+    tilesEl.innerHTML = '';
+    noteEl.textContent = '';
+    if (!curMeta || curMeta.w === 0) return;
+    const cs = curCs, borders = curBorders, meta = curMeta, tiles = curTiles;
+    for (const t of tiles) {
+      const bin = t.bin;
+      const tileH = t.tileH;
+      const cv = document.createElement('canvas');
+      cv.width  = meta.w * cs;
+      cv.height = tileH  * cs;
+      cv.style.display = 'block';
+      const ctx = cv.getContext('2d');
+
+      if (cs === 1) {
+        const img = ctx.createImageData(meta.w, tileH);
+        for (let y = 0; y < tileH; y++) {
+          for (let x = 0; x < meta.w; x++) {
+            const i = y * meta.w + x;
+            const bit = bitAt(bin, i);
+            const p = i * 4, v = bit ? 0 : 255;
+            img.data[p]=v; img.data[p+1]=v; img.data[p+2]=v; img.data[p+3]=255;
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+      } else {
+        cv.style.width    = cv.width  + 'px';
+        cv.style.height   = cv.height + 'px';
+        cv.style.maxWidth = 'none';
+        if (borders) {
+          const rawBw = (typeof meta.bw === 'number') ? meta.bw : 1;
+          const bw = Math.max(0, Math.min(rawBw, cs));
+          const ci = Math.max(0, cs - bw);
+          ctx.fillStyle = '#d9d3c4';
+          ctx.fillRect(0, 0, cv.width, cv.height);
+          // Two-pass: white cells first, black cells second — avoids
+          // per-cell fillStyle changes that force GPU state flushes.
+          ctx.fillStyle = '#ffffff';
+          for (let y = 0; y < tileH; y++) {
+            for (let x = 0; x < meta.w; x++) {
+              if (!bitAt(bin, y * meta.w + x)) ctx.fillRect(x*cs+bw, y*cs+bw, ci, ci);
+            }
+          }
+          ctx.fillStyle = '#1a1816';
+          for (let y = 0; y < tileH; y++) {
+            for (let x = 0; x < meta.w; x++) {
+              if (bitAt(bin, y * meta.w + x)) ctx.fillRect(x*cs+bw, y*cs+bw, ci, ci);
+            }
+          }
+        } else {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, cv.width, cv.height);
+          ctx.fillStyle = '#1a1816';
+          for (let y = 0; y < tileH; y++) {
+            for (let x = 0; x < meta.w; x++) {
+              const i = y * meta.w + x;
+              if (bitAt(bin, i)) ctx.fillRect(x*cs, y*cs, cs, cs);
+            }
+          }
+        }
+      }
+      tilesEl.appendChild(cv);
+    }
+    if (tiles.length > 1) {
+      noteEl.textContent = 'Rendered ' + tiles.length + ' stacked canvases (full fidelity, stride 1).';
+    }
+  }
+
+  function applyCs(v) {
+    curCs = Math.max(1, parseInt(v, 10) || 1);
+    csRange.value = Math.min(curCs, 16);
+    csNum.value = curCs;
+    renderCanvas();
+  }
+  csRange.addEventListener('input',  () => applyCs(csRange.value));
+  csNum.addEventListener('change',   () => applyCs(csNum.value));
+  bCheck.addEventListener('change',  () => { curBorders = bCheck.checked; renderCanvas(); });
+
+  function applyLoaded(meta, tiles) {
+    curMeta = meta; curTiles = tiles;
+    curCs = meta.cs || 4;
+    curBorders = !!meta.borders;
+    csRange.value = Math.min(curCs, 16);
+    csNum.value = curCs;
+    bCheck.checked = curBorders;
+    renderCanvas();
+    vProgress.className = 'done';
+  }
+
+  // ── Viewer bar ────────────────────────────────────────────────────────────
+  function paintViewerBar(e) {
+    vTag.textContent   = 'RULE ' + String(e.rule).padStart(3, '0');
+    vTitle.textContent = displayName(e);
+    vFile.textContent  = e.filename || '';
+
+    const cells = [
+      ['Width',     e.width],
+      ['Gens',      (e.progress !== undefined ? e.progress : e.generations) + ' / ' + e.generations],
+      ['Boundary',  e.boundary],
+      ['Padding',   (e.fill || '—') + ' ' + (e.align || '')],
+      ['IC',        e.ic || '—'],
+    ];
+    vMetaBar.innerHTML = cells.map(([k, v]) =>
+      '<div class="vbar-cell"><dt>' + esc(k) + '</dt><dd>' + esc(String(v)) + '</dd></div>'
+    ).join('');
+
+    body.classList.add('has-run');
+    vProgress.className = 'loading';
+  }
+
+  // ── Load saved run ────────────────────────────────────────────────────────
+  function loadSavedRun(e, entryEl) {
+    setActive(entryEl);
+    tilesEl.innerHTML = ''; noteEl.textContent = '';
+    paintViewerBar(e);
+
+    fetch('/runs/' + e.filename)
+      .then(r => { if (!r.ok) throw new Error('not found'); return r.text(); })
+      .then(html => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const meta = JSON.parse(doc.getElementById('meta').textContent);
+        const tiles = (meta.tiles || []).map(t => {
+          const el = doc.getElementById(t.id);
+          return { bin: atob((el ? el.textContent : '').trim()),
+                   tileH: Math.max(0, (t.end || 0) - (t.start || 0)) };
+        }).filter(t => t.tileH > 0);
+        applyLoaded(meta, tiles);
+      })
+      .catch(() => {
+        tilesEl.innerHTML =
+          '<div class="err-box">Could not load <code>' + esc(e.filename) + '</code>.</div>';
+      });
+  }
+
+  // ── Session run management ────────────────────────────────────────────────
+  function addSessionRun(data) {
+    const tilesData = data.tiles.map(t => {
+      const tileMeta = (data.meta.tiles || []).find(m => m.id === t.id) || {};
+      return {
+        bin: atob(t.b64),
+        tileH: Math.max(0, (tileMeta.end || 0) - (tileMeta.start || 0)),
+      };
+    }).filter(t => t.tileH > 0);
+
+    const entry = { meta: data.meta, tilesData, data };
+
+    const entryEl = document.createElement('div');
+    entryEl.className = 'session-entry';
+    entryEl.dataset.sessionId = data.id;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'session-name';
+    nameSpan.textContent = '#' + data.id + ' rule ' + data.rule;
+
+    const menuWrap = document.createElement('div');
+    menuWrap.className = 'session-menu-wrap';
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'session-menu-btn';
+    menuBtn.textContent = '⋮';
+    menuBtn.title = 'Options';
+    menuBtn.type = 'button';
+
+    const popup = document.createElement('div');
+    popup.className = 'session-popup';
+
+    const saveItem = document.createElement('button');
+    saveItem.className = 'session-popup-item';
+    saveItem.textContent = 'Save';
+    saveItem.type = 'button';
+
+    const removeItem = document.createElement('button');
+    removeItem.className = 'session-popup-item danger';
+    removeItem.textContent = 'Remove';
+    removeItem.type = 'button';
+
+    menuBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const isOpen = popup.classList.contains('open');
+      for (const p of document.querySelectorAll('.session-popup.open')) p.classList.remove('open');
+      if (!isOpen) {
+        // Reset save label on re-open unless permanently saved
+        if (saveItem.textContent !== 'Saved') {
+          saveItem.textContent = 'Save';
+          saveItem.style.color = '';
+          saveItem.disabled = false;
+        }
+        popup.classList.add('open');
+      }
+    });
+
+    saveItem.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      popup.classList.remove('open');
+      saveSessionRun(data.id, saveItem);
+    });
+
+    removeItem.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      popup.classList.remove('open');
+      removeSessionRun(data.id, entryEl);
+    });
+
+    popup.appendChild(saveItem);
+    popup.appendChild(removeItem);
+    menuWrap.appendChild(menuBtn);
+    menuWrap.appendChild(popup);
+
+    entryEl.appendChild(nameSpan);
+    entryEl.appendChild(menuWrap);
+
+    entryEl.addEventListener('click', () => {
+      setActive(entryEl);
+      const sr = sessionRuns[data.id];
+      if (!sr) return;
+      paintViewerBar({
+        rule: data.rule, width: data.width, generations: data.generations,
+        boundary: data.boundary, ic: data.ic, fill: data.fill, align: data.align,
+      });
+      applyLoaded(sr.meta, sr.tilesData);
+    });
+
+    sessionRuns[data.id] = { ...entry, entryEl, saveItem };
+    sessionEmptyEl.style.display = 'none';
+    simSessionListEl.appendChild(entryEl);
+
+    entryEl.click();
+  }
+
+  async function saveSessionRun(id, saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const resp = await fetch('/api/runs/' + id + '/save', { method: 'POST' });
+      if (resp.status === 409) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Already saved';
+        await refreshSavedSidebar();
+        return;
+      }
+      if (!resp.ok) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Retry';
+        return;
+      }
+      saveBtn.textContent = 'Saved';
+      saveBtn.style.color = 'oklch(46% 0.12 145)';
+      await refreshSavedSidebar();
+    } catch {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Retry';
+    }
+  }
+
+  async function removeSessionRun(id, entryEl) {
+    await fetch('/api/runs/' + id, { method: 'DELETE' });
+    delete sessionRuns[id];
+    entryEl.remove();
+    if (activeEl === entryEl) {
+      clearViewer();
+    }
+    if (Object.keys(sessionRuns).length === 0) {
+      sessionEmptyEl.style.display = '';
+    }
+  }
+
+  // ── Saved-run delete ──────────────────────────────────────────────────────
+  async function deleteSaved(filename, entryEl) {
+    try {
+      const resp = await fetch('/api/saved/' + encodeURIComponent(filename), { method: 'DELETE' });
+      if (!resp.ok) return;
+    } catch { return; }
+    entryEl.remove();
+    const remaining = listEl.querySelectorAll('.run-entry').length;
+    countEl.textContent = remaining;
+    for (const det of listEl.querySelectorAll('details.rule-group')) {
+      if (det.querySelectorAll('.run-entry').length === 0) det.remove();
+    }
+  }
+
+  // ── Manifest / refresh ────────────────────────────────────────────────────
+  function parseTsv(text) {
+    const lines = text.trim().split('\n'); const out = [];
+    for (let i = 1; i < lines.length; i++) {
+      const p = lines[i].split('\t');
+      if (p.length < 9) continue;
+      out.push({ id:p[0], rule:p[1], width:p[2], generations:p[3],
+                 boundary:p[4], status:p[5], progress:p[6], timestamp:p[7], filename:p[8],
+                 fill:p[9]||'', align:p[10]||'', ic:p[11]||'' });
+    }
+    return out;
+  }
+
+  async function refreshSavedSidebar() {
+    try {
+      const r = await fetch('/manifest.tsv');
+      const text = r.ok ? await r.text() : '';
+      buildSidebar(text.trim() ? parseTsv(text) : []);
+    } catch {
+      buildSidebar([]);
+    }
+  }
+
+  function autoLoadFromHash() {
+    const hash = decodeURIComponent(location.hash.slice(1));
+    if (!hash) return;
+    const div = listEl.querySelector('[data-filename="' + hash.replace(/"/g, '\\"') + '"]');
+    if (div) div.click();
+  }
+
+  // ── Reset form ────────────────────────────────────────────────────────────
+  resetBtn.addEventListener('click', () => {
+    document.getElementById('f-seed').value = '0000000001';
+    document.getElementById('f-rule').value = '102';
+    document.getElementById('f-gens').value = '10';
+    document.getElementById('f-width').value = '10';
+    document.getElementById('f-cs').value = '4';
+    setBoundary('ZeroPadded');
+    document.getElementById('f-align').value = 'Before';
+    document.getElementById('f-fill').value = 'Zero';
+    document.getElementById('f-borders').checked = false;
+    clearFormError();
+  });
+
+  // ── Form submit ───────────────────────────────────────────────────────────
+  function showFormError(msg) {
+    formErr.textContent = msg;
+    formErr.style.display = '';
+  }
+  function clearFormError() {
+    formErr.textContent = '';
+    formErr.style.display = 'none';
+  }
+
+  runBtn.addEventListener('click', async () => {
+    clearFormError();
+    runBtn.disabled = true;
+    runBtn.textContent = 'Running…';
+    try {
+      const body_data = {
+        seed:         document.getElementById('f-seed').value,
+        rule:         parseInt(document.getElementById('f-rule').value, 10),
+        generations:  parseInt(document.getElementById('f-gens').value, 10),
+        width:        parseInt(document.getElementById('f-width').value, 10),
+        cell_size:    parseInt(document.getElementById('f-cs').value, 10),
+        boundary:     document.getElementById('f-boundary').value,
+        align:        document.getElementById('f-align').value,
+        fill:         document.getElementById('f-fill').value,
+        show_borders: document.getElementById('f-borders').checked,
+      };
+      const resp = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body_data),
+      });
+      if (!resp.ok) {
+        showFormError(await resp.text());
+        return;
+      }
+      const data = await resp.json();
+      addSessionRun(data);
+    } catch (e) {
+      showFormError(String(e));
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = 'RUN SIMULATION →';
+    }
+  });
+
+  // ── Global popup close ────────────────────────────────────────────────────
+  document.addEventListener('click', () => {
+    for (const p of document.querySelectorAll('.session-popup.open')) p.classList.remove('open');
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') {
+      for (const p of document.querySelectorAll('.session-popup.open')) p.classList.remove('open');
+    }
+  });
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  async function init() {
+    body.classList.add('sidebar-open');
+    showScreen('home');
+    await refreshSavedSidebar();
+    autoLoadFromHash();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

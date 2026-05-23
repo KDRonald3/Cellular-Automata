@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cellular Automata — Runs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #f6f4ef;
+    --bg-sunk:   #efece5;
+    --bg-card:   #fbfaf6;
+    --ink:       #1a1816;
+    --ink-2:     #4a4641;
+    --ink-3:     #8a847b;
+    --rule:      #d9d3c4;
+    --rule-soft: #e6e1d2;
+    --accent:    oklch(54% 0.14 35);
+    --accent-bg: oklch(96% 0.025 35);
+    --accent-br: oklch(82% 0.06 35);
+    --sans: "IBM Plex Sans", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sidebar-w: 304px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    display: grid;
+    grid-template-columns: 0px 1fr;
+    grid-template-rows: 100%;
+    transition: grid-template-columns 260ms cubic-bezier(.4,.0,.2,1);
+    overflow: hidden;
+  }
+  body.sidebar-open { grid-template-columns: var(--sidebar-w) 1fr; }
+  aside#sidebar {
+    overflow: hidden;
+    background: var(--bg-sunk);
+    border-right: 1px solid var(--rule);
+    display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .sidebar-inner { width: var(--sidebar-w); height: 100%; display: flex; flex-direction: column; min-width: 0; }
+  .sidebar-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--rule); flex: 0 0 auto; }
+  .sb-title {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em;
+    color: var(--ink-3); text-transform: uppercase; margin: 0 0 10px 0;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .sb-title .count { background: var(--rule-soft); color: var(--ink-2); padding: 1px 6px; border-radius: 999px; letter-spacing: 0.04em; font-weight: 500; }
+  .filter-wrap { position: relative; }
+  #filter {
+    width: 100%; padding: 8px 10px 8px 30px; border: 1px solid var(--rule);
+    background: var(--bg-card); border-radius: 6px; font-family: var(--mono);
+    font-size: 12px; color: var(--ink); outline: none; transition: border-color 120ms, background 120ms;
+  }
+  #filter::placeholder { color: var(--ink-3); }
+  #filter:focus { border-color: var(--accent-br); }
+  .filter-wrap::before {
+    content: ""; position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    width: 12px; height: 12px; border: 1.5px solid var(--ink-3); border-radius: 50%;
+  }
+  .filter-wrap::after {
+    content: ""; position: absolute; left: 19px; top: calc(50% + 4px);
+    width: 6px; height: 1.5px; background: var(--ink-3);
+    transform: rotate(45deg); transform-origin: left top;
+  }
+  nav#run-list { flex: 1 1 auto; overflow-y: auto; padding: 4px 0 24px; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+  nav#run-list::-webkit-scrollbar { width: 8px; }
+  nav#run-list::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 999px; }
+  .rule-group { border-bottom: 1px solid var(--rule); }
+  .rule-group > summary {
+    list-style: none; cursor: pointer; padding: 11px 16px 10px;
+    display: flex; align-items: center; gap: 10px; user-select: none;
+    background: transparent; transition: background 120ms;
+  }
+  .rule-group > summary::-webkit-details-marker { display: none; }
+  .rule-group > summary:hover { background: rgba(0,0,0,0.025); }
+  .chev {
+    width: 9px; height: 9px; border-right: 1.5px solid var(--ink-2);
+    border-bottom: 1.5px solid var(--ink-2); transform: rotate(-45deg);
+    transition: transform 160ms; flex: 0 0 auto;
+  }
+  .rule-group[open] > summary .chev { transform: rotate(45deg); }
+  .rule-label { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink); }
+  .rule-num { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .rule-count { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.04em; }
+  .group-body { padding: 0 8px 8px; }
+  .run-entry {
+    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    column-gap: 8px; padding: 7px 10px 8px 18px; margin: 1px 0;
+    border-radius: 5px; cursor: pointer; position: relative; transition: background 100ms;
+  }
+  .run-entry:hover { background: rgba(0,0,0,0.03); }
+  .run-entry.active { background: var(--accent-bg); }
+  .run-entry.active::before {
+    content: ""; position: absolute; left: 6px; top: 8px; bottom: 8px;
+    width: 2px; background: var(--accent); border-radius: 1px;
+  }
+  .run-name { font-family: var(--mono); font-size: 11.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .run-meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.02em; }
+  .run-entry.active .run-name { color: var(--accent); }
+  .run-entry.active .run-meta { color: oklch(45% 0.10 35); }
+  main#main { min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--bg); }
+  header.topbar {
+    flex: 0 0 auto; height: 52px; border-bottom: 1px solid var(--rule);
+    background: var(--bg); display: flex; align-items: center; gap: 14px; padding: 0 20px 0 14px;
+  }
+  #toggle {
+    width: 32px; height: 32px; border: 1px solid var(--rule); background: var(--bg-card);
+    border-radius: 6px; cursor: pointer; padding: 0; display: grid; place-items: center;
+    transition: background 120ms, border-color 120ms;
+  }
+  #toggle:hover { background: var(--bg-sunk); border-color: var(--ink-3); }
+  #toggle svg { display: block; }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink); }
+  .brand .mark { width: 18px; height: 18px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 1px; }
+  .brand .mark i { background: var(--ink); display: block; }
+  .brand .mark i.off { background: transparent; }
+  .topbar .spacer { flex: 1; }
+  .topbar .dim { color: var(--ink-3); font-weight: 400; }
+  #content { flex: 1 1 auto; overflow: auto; padding: 28px 32px 64px; }
+  #empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100%; color: var(--ink-3); text-align: center; gap: 18px; }
+  #empty .grid-deco {
+    width: 220px; aspect-ratio: 1;
+    background-image: linear-gradient(var(--rule) 1px, transparent 1px), linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 11px 11px; opacity: 0.55;
+    mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+  }
+  #empty .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+  #empty .hint { font-family: var(--sans); font-size: 14px; color: var(--ink-2); max-width: 340px; }
+  #viewer { display: none; max-width: 1400px; }
+  body.has-run #viewer { display: block; }
+  body.has-run #empty { display: none; }
+  .viewer-head { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 24px; }
+  .rule-tag { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
+  h1.run-title { font-family: var(--sans); font-weight: 600; font-size: 26px; line-height: 1.25; margin: 0; color: var(--ink); text-wrap: pretty; }
+  h1.run-title .num { font-family: var(--mono); font-weight: 600; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 0; margin: 18px 0 4px; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 10px 0; }
+  .meta-cell { display: flex; flex-direction: column; gap: 2px; padding: 2px 22px 2px 0; border-right: 1px solid var(--rule-soft); margin-right: 22px; }
+  .meta-cell:last-child { border-right: 0; margin-right: 0; }
+  .meta-cell dt { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin: 0; }
+  .meta-cell dd { font-family: var(--mono); font-size: 13.5px; color: var(--ink); margin: 0; font-weight: 500; }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; padding: 2px 7px; border: 1px solid var(--rule); border-radius: 999px; color: var(--ink-2); background: var(--bg-card); }
+  .pill.done { color: oklch(46% 0.12 145); border-color: oklch(82% 0.06 145); background: oklch(96% 0.03 145); }
+  .controls { display: flex; flex-wrap: wrap; gap: 24px 28px; align-items: center; padding: 14px 0 18px; margin: 0 0 4px; border-bottom: 1px solid var(--rule); }
+  .ctrl { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+  .ctrl label { font-size: 10.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink-3); }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 140px; background: transparent; height: 16px; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 2px; background: var(--rule); border-radius: 999px; }
+  input[type="range"]::-moz-range-track { height: 2px; background: var(--rule); border-radius: 999px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: var(--ink); border-radius: 50%; margin-top: -6px; cursor: pointer; transition: background 120ms; }
+  input[type="range"]::-webkit-slider-thumb:hover { background: var(--accent); }
+  input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; background: var(--ink); border: 0; border-radius: 50%; cursor: pointer; }
+  input[type="number"] { width: 52px; padding: 4px 6px; border: 1px solid var(--rule); background: var(--bg-card); border-radius: 5px; font-family: var(--mono); font-size: 12px; color: var(--ink); outline: none; text-align: right; }
+  input[type="number"]:focus { border-color: var(--accent-br); }
+  .check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+  .check input { position: absolute; opacity: 0; }
+  .check .box { width: 14px; height: 14px; border: 1.5px solid var(--ink-3); border-radius: 3px; display: grid; place-items: center; background: var(--bg-card); transition: border-color 120ms, background 120ms; }
+  .check input:checked + .box { background: var(--ink); border-color: var(--ink); }
+  .check input:checked + .box::after { content: ""; width: 7px; height: 4px; border-left: 1.5px solid var(--bg); border-bottom: 1.5px solid var(--bg); transform: translateY(-1px) rotate(-45deg); }
+  .check .lbl { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+  .canvas-card { margin-top: 22px; background: var(--bg-card); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; position: relative; overflow: hidden; }
+  .canvas-card::before { content: ""; position: absolute; top: 8px; left: 8px; width: 10px; height: 10px; border-top: 1.5px solid var(--rule); border-left: 1.5px solid var(--rule); }
+  .canvas-card::after { content: ""; position: absolute; bottom: 8px; right: 8px; width: 10px; height: 10px; border-bottom: 1.5px solid var(--rule); border-right: 1.5px solid var(--rule); }
+  .canvas-meta { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink-3); }
+  .canvas-meta .dims { color: var(--ink-2); }
+  #tile-note { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 10px; }
+  #tiles { display: flex; flex-direction: column; align-items: flex-start; }
+  #tiles canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; background: white; box-shadow: 0 0 0 1px var(--rule); max-width: 100%; height: auto; }
+  .err-box { margin-top: 18px; padding: 14px 16px; border: 1px dashed oklch(70% 0.12 35); background: oklch(96% 0.03 35); border-radius: 8px; font-family: var(--mono); font-size: 12px; color: oklch(40% 0.12 35); line-height: 1.55; }
+  .err-box code { background: rgba(0,0,0,0.06); padding: 1px 4px; border-radius: 3px; }
+  .err-box a { color: oklch(40% 0.12 35); }
+</style>
+</head>
+<body class="">
+
+<aside id="sidebar">
+  <div class="sidebar-inner">
+    <div class="sidebar-head">
+      <div class="sb-title">
+        <span>Saved runs</span>
+        <span class="count" id="total-count">0</span>
+      </div>
+      <div class="filter-wrap">
+        <input id="filter" placeholder="Filter…" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <nav id="run-list"></nav>
+  </div>
+</aside>
+
+<main id="main">
+  <header class="topbar">
+    <button id="toggle" title="Toggle sidebar" aria-label="Toggle sidebar">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <rect x="1" y="2.25" width="12" height="1.5" fill="#1a1816"/>
+        <rect x="1" y="6.25" width="12" height="1.5" fill="#1a1816"/>
+        <rect x="1" y="10.25" width="12" height="1.5" fill="#1a1816"/>
+      </svg>
+    </button>
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <i></i><i class="off"></i><i></i>
+        <i></i><i></i><i class="off"></i>
+        <i class="off"></i><i></i><i></i>
+      </span>
+      <span>Cellular Automata <span class="dim">/ Runs</span></span>
+    </div>
+    <div class="spacer"></div>
+  </header>
+
+  <div id="content">
+    <div id="empty">
+      <div class="grid-deco" aria-hidden="true"></div>
+      <div class="label">No run selected</div>
+      <div class="hint">Open the sidebar and pick a saved run to inspect it. Runs are grouped by rule and sorted by initial condition, then by generation count.</div>
+    </div>
+
+    <article id="viewer">
+      <div class="viewer-head">
+        <div class="rule-tag" id="v-tag">RULE —</div>
+        <h1 class="run-title" id="v-title">—</h1>
+      </div>
+      <dl class="meta-row" id="v-meta"></dl>
+      <div class="controls">
+        <div class="ctrl">
+          <label for="cs-range">Cell size</label>
+          <input id="cs-range" type="range" min="1" max="16">
+          <input id="cs-num" type="number" min="1" max="64">
+          <span style="color:var(--ink-3)">px</span>
+        </div>
+        <label class="check">
+          <input id="b-check" type="checkbox">
+          <span class="box"></span>
+          <span class="lbl">Cell borders</span>
+        </label>
+        <div class="ctrl" style="margin-left:auto">
+          <label>File</label>
+          <span id="v-file" class="run-meta" style="font-size:11.5px;color:var(--ink-2)">—</span>
+        </div>
+      </div>
+      <div class="canvas-card">
+        <div class="canvas-meta">
+          <span id="v-pre">Preview</span>
+          <span class="dims" id="v-dims">—</span>
+        </div>
+        <div id="tiles"></div>
+        <div id="tile-note"></div>
+      </div>
+    </article>
+  </div>
+</main>
+
+<script id="baked" type="application/json">

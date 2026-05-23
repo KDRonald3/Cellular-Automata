@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multiples of 17 Binary Grid</title>
+  <style>
+    @page { size: Letter; margin: 0.45in; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #1f2937; background: #ffffff; }
+    .wrap { max-width: 1000px; margin: 0 auto; }
+    h1 { text-align: center; margin: 0 0 6px 0; font-size: 24px; color: #0f172a; }
+    .subtitle { text-align: center; margin-bottom: 18px; font-size: 11px; color: #475569; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .card { border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); box-shadow: 0 1px 2px rgba(0,0,0,0.05); break-inside: avoid; min-height: 64px; }
+    .dec { font-weight: 700; font-size: 17px; color: #111827; margin-bottom: 6px; }
+    .bin { font-family: "Courier New", monospace; font-size: 14px; letter-spacing: 1.1px; color: #1d4ed8; }
+    @media print { .grid { gap: 8px; } .card { box-shadow: none; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Multiples of 17 from 0 to 255</h1>
+    <div class="subtitle">Decimal values with 8-bit binary representations</div>
+    <div class="grid">
+      <div class="card"><div class="dec">0</div><div class="bin">00000000</div></div>
+      <div class="card"><div class="dec">17</div><div class="bin">00010001</div></div>
+      <div class="card"><div class="dec">34</div><div class="bin">00100010</div></div>
+      <div class="card"><div class="dec">51</div><div class="bin">00110011</div></div>
+      <div class="card"><div class="dec">68</div><div class="bin">01000100</div></div>
+      <div class="card"><div class="dec">85</div><div class="bin">01010101</div></div>
+      <div class="card"><div class="dec">102</div><div class="bin">01100110</div></div>
+      <div class="card"><div class="dec">119</div><div class="bin">01110111</div></div>
+      <div class="card"><div class="dec">136</div><div class="bin">10001000</div></div>
+      <div class="card"><div class="dec">153</div><div class="bin">10011001</div></div>
+      <div class="card"><div class="dec">170</div><div class="bin">10101010</div></div>
+      <div class="card"><div class="dec">187</div><div class="bin">10111011</div></div>
+      <div class="card"><div class="dec">204</div><div class="bin">11001100</div></div>
+      <div class="card"><div class="dec">221</div><div class="bin">11011101</div></div>
+      <div class="card"><div class="dec">238</div><div class="bin">11101110</div></div>
+      <div class="card"><div class="dec">255</div><div class="bin">11111111</div></div>
+    </div>
+  </div>
+</body>
+</html>

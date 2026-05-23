@@ -1,0 +1,6 @@
+/target
+/cellular_automata/target
+/samples/target
+/samples/runs/
+**/.claude/
+*.pdb
