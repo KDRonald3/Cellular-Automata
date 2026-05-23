@@ -1,11 +1,13 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufRead, BufReader, Write as IoWrite};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::{
     Router,
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, Path as AxumPath, State},
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -16,11 +18,11 @@ use base64::Engine as _;
 use cellular_automata::{
     BoundaryMode, InitialRow, OutputKind, PaddingAlign, PaddingFill,
     RenderOptions, SimConfig, SimulationResult,
-    delete_saved_run, run, save_result_if_unique,
+    run, save_result,
 };
 use serde::{Deserialize, Serialize};
 
-// ── Tile packing (replicated from cellular_automata::export — kept private) ──
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const MAX_EXPORT_CELLS: usize = 200_000_000;
 const MAX_EXPORT_HEIGHT: usize = 32_000;
@@ -28,6 +30,279 @@ const MAX_SESSIONS: usize = 1_000;
 const MAX_WIDTH: usize = 10_000;
 const MAX_GENERATIONS: usize = 100_000;
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
+
+const MANIFEST_FILE: &str = "manifest.tsv";
+const INDEX_FILE: &str = "index.html";
+const GALLERY_HTML_HEAD: &str = include_str!("gallery.html.template");
+const GALLERY_HTML_TAIL: &str = "\n</script>\n<script src=\"gallery.js\"></script>\n</body></html>\n";
+const GALLERY_JS: &str = include_str!("gallery.js");
+
+// ── Gallery / manifest state ──────────────────────────────────────────────────
+
+/// Process-wide lock serialising manifest reads + writes so concurrent saves
+/// and deletes don't tear `manifest.tsv` or `index.html`.
+static MANIFEST_LOCK: Mutex<()> = Mutex::new(());
+static NEXT_SAVE_JOB_ID: AtomicU64 = AtomicU64::new(1);
+
+struct ManifestEntry {
+    id: String,
+    rule: String,
+    width: String,
+    generations: String,
+    boundary: String,
+    status: String,
+    progress: String,
+    timestamp: String,
+    filename: String,
+    fill: String,
+    align: String,
+    ic: String,
+}
+
+fn read_manifest(dir: &Path) -> io::Result<Vec<ManifestEntry>> {
+    let path = dir.join(MANIFEST_FILE);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let f = File::open(&path)?;
+    let reader = BufReader::new(f);
+    let mut entries = Vec::new();
+    for (i, line) in reader.lines().enumerate() {
+        let line = line?;
+        if i == 0 || line.trim().is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() < 9 {
+            continue;
+        }
+        entries.push(ManifestEntry {
+            id:         parts[0].to_string(),
+            rule:       parts[1].to_string(),
+            width:      parts[2].to_string(),
+            generations: parts[3].to_string(),
+            boundary:   parts[4].to_string(),
+            status:     parts[5].to_string(),
+            progress:   parts[6].to_string(),
+            timestamp:  parts[7].to_string(),
+            filename:   parts[8].to_string(),
+            fill:  parts.get(9).copied().unwrap_or("").to_string(),
+            align: parts.get(10).copied().unwrap_or("").to_string(),
+            ic:    parts.get(11).copied().unwrap_or("").to_string(),
+        });
+    }
+    Ok(entries)
+}
+
+fn append_manifest(
+    dir: &Path,
+    entry: &ManifestEntry,
+) -> io::Result<()> {
+    let path = dir.join(MANIFEST_FILE);
+    let exists = path.exists();
+    let mut f = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+
+    if !exists {
+        writeln!(
+            f,
+            "id\trule\twidth\tgenerations\tboundary\tstatus\tprogress\ttimestamp\tfilename\tfill\talign\tic"
+        )?;
+    }
+
+    writeln!(
+        f,
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        sanitize_tsv(&entry.id),
+        sanitize_tsv(&entry.rule),
+        sanitize_tsv(&entry.width),
+        sanitize_tsv(&entry.generations),
+        sanitize_tsv(&entry.boundary),
+        sanitize_tsv(&entry.status),
+        sanitize_tsv(&entry.progress),
+        sanitize_tsv(&entry.timestamp),
+        sanitize_tsv(&entry.filename),
+        sanitize_tsv(&entry.fill),
+        sanitize_tsv(&entry.align),
+        sanitize_tsv(&entry.ic),
+    )?;
+
+    Ok(())
+}
+
+fn sanitize_tsv(s: &str) -> String {
+    s.chars()
+        .map(|c| if c == '\t' || c == '\n' || c == '\r' { ' ' } else { c })
+        .collect()
+}
+
+fn json_str_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"'  => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '<'  => out.push_str("\\u003c"),
+            '>'  => out.push_str("\\u003e"),
+            '/'  => out.push_str("\\u002f"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn regenerate_index(dir: &Path) -> io::Result<()> {
+    let entries = read_manifest(dir)?;
+    let valid: Vec<&ManifestEntry> = entries.iter()
+        .filter(|e| dir.join(&e.filename).exists())
+        .collect();
+
+    let mut baked = String::from("[");
+    let mut first = true;
+    for e in valid.iter() {
+        if !first { baked.push(','); }
+        first = false;
+        baked.push_str(&format!(
+            "{{\"id\":\"{}\",\"rule\":\"{}\",\"width\":\"{}\",\"generations\":\"{}\",\
+             \"boundary\":\"{}\",\"status\":\"{}\",\"progress\":\"{}\",\"timestamp\":\"{}\",\
+             \"filename\":\"{}\",\"fill\":\"{}\",\"align\":\"{}\",\"ic\":\"{}\"}}",
+            json_str_escape(&e.id),
+            json_str_escape(&e.rule),
+            json_str_escape(&e.width),
+            json_str_escape(&e.generations),
+            json_str_escape(&e.boundary),
+            json_str_escape(&e.status),
+            json_str_escape(&e.progress),
+            json_str_escape(&e.timestamp),
+            json_str_escape(&e.filename),
+            json_str_escape(&e.fill),
+            json_str_escape(&e.align),
+            json_str_escape(&e.ic),
+        ));
+    }
+    baked.push(']');
+
+    // Write gallery.js next to index.html so the <script src="gallery.js"> tag resolves.
+    // Only write if absent — contents are compile-time constants, so they never change.
+    let gallery_js_path = dir.join("gallery.js");
+    if !gallery_js_path.exists() {
+        fs::write(&gallery_js_path, GALLERY_JS)?;
+    }
+
+    let html = format!("{}{}{}", GALLERY_HTML_HEAD, baked, GALLERY_HTML_TAIL);
+    fs::write(dir.join(INDEX_FILE), html)?;
+    Ok(())
+}
+
+fn save_result_if_unique(
+    result: &SimulationResult,
+    opts: &RenderOptions,
+    dir: &Path,
+    fill: PaddingFill,
+    align: PaddingAlign,
+) -> io::Result<PathBuf> {
+    fs::create_dir_all(dir)?;
+
+    let ic = if result.width == 0 || result.rows.is_empty() {
+        "0".to_string()
+    } else {
+        compute_ic(&result.rows[0..result.width])
+    };
+    let rule_str     = result.config.rule.to_string();
+    let width_str    = result.width.to_string();
+    let gens_str     = result.generations.to_string();
+    let boundary_str = result.config.boundary.to_string();
+    let fill_str     = fill_label(fill);
+    let align_str    = align_label(align);
+
+    let _guard = MANIFEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+    if let Ok(entries) = read_manifest(dir) {
+        for e in &entries {
+            if e.rule == rule_str
+                && e.width == width_str
+                && e.generations == gens_str
+                && e.boundary == boundary_str
+                && e.fill == fill_str
+                && e.align == align_str
+                && e.ic == ic
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("duplicate:{}", e.filename),
+                ));
+            }
+        }
+    }
+
+    let path = save_result(result, opts, dir, fill, align)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+
+    let filename = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    let now = chrono::Local::now();
+    let ts_human = now.format("%Y-%m-%d %H:%M:%S").to_string();
+    let job_id = NEXT_SAVE_JOB_ID.fetch_add(1, Ordering::Relaxed);
+
+    let entry = ManifestEntry {
+        id:         job_id.to_string(),
+        rule:       rule_str,
+        width:      width_str,
+        generations: gens_str,
+        boundary:   boundary_str,
+        status:     "Done".to_string(),
+        progress:   result.generations.to_string(),
+        timestamp:  ts_human,
+        filename:   filename,
+        fill:       fill_str.to_string(),
+        align:      align_str.to_string(),
+        ic,
+    };
+    append_manifest(dir, &entry)?;
+    regenerate_index(dir)?;
+
+    Ok(path)
+}
+
+fn delete_saved_run(dir: &Path, filename: &str) -> io::Result<()> {
+    if !is_safe_filename(filename) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "unsafe filename"));
+    }
+    let _guard = MANIFEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    if let Err(e) = fs::remove_file(dir.join(filename)) {
+        if e.kind() != io::ErrorKind::NotFound {
+            return Err(e);
+        }
+    }
+    let manifest_path = dir.join(MANIFEST_FILE);
+    if manifest_path.exists() {
+        let entries = read_manifest(dir)?;
+        let mut f = OpenOptions::new()
+            .write(true).create(true).truncate(true)
+            .open(&manifest_path)?;
+        writeln!(f, "id\trule\twidth\tgenerations\tboundary\tstatus\tprogress\ttimestamp\tfilename\tfill\talign\tic")?;
+        for e in &entries {
+            if e.filename != filename {
+                writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    e.id, e.rule, e.width, e.generations, e.boundary,
+                    e.status, e.progress, e.timestamp, e.filename,
+                    e.fill, e.align, e.ic)?;
+            }
+        }
+    }
+    regenerate_index(dir)
+}
+
+// ── Tile packing ──────────────────────────────────────────────────────────────
 
 fn is_safe_filename(name: &str) -> bool {
     !name.is_empty()
@@ -323,7 +598,7 @@ async fn get_manifest(State(state): State<AppState>) -> Response {
 
 async fn get_run_file(
     State(state): State<AppState>,
-    Path(filename): Path<String>,
+    AxumPath(filename): AxumPath<String>,
 ) -> Response {
     if !is_safe_filename(&filename) || !filename.ends_with(".html") {
         return StatusCode::BAD_REQUEST.into_response();
@@ -437,7 +712,7 @@ async fn post_run(
 
 async fn post_save_run(
     State(state): State<AppState>,
-    Path(id_str): Path<String>,
+    AxumPath(id_str): AxumPath<String>,
 ) -> Response {
     let id: u64 = match id_str.parse() {
         Ok(n) => n,
@@ -455,7 +730,6 @@ async fn post_save_run(
     };
 
     let runs_dir = state.runs_dir.clone();
-    // Dedup check and save are atomic under MANIFEST_LOCK inside save_result_if_unique.
     let outcome = tokio::task::spawn_blocking(move || {
         save_result_if_unique(&sr.result, &sr.render, &runs_dir, sr.padding_fill, sr.padding_align)
     })
@@ -463,7 +737,7 @@ async fn post_save_run(
 
     match outcome {
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+        Ok(Err(e)) if e.kind() == io::ErrorKind::AlreadyExists => {
             let existing = e.to_string()
                 .strip_prefix("duplicate:")
                 .unwrap_or("")
@@ -483,7 +757,7 @@ async fn post_save_run(
 
 async fn delete_session_run(
     State(state): State<AppState>,
-    Path(id_str): Path<String>,
+    AxumPath(id_str): AxumPath<String>,
 ) -> Response {
     let id: u64 = match id_str.parse() {
         Ok(n) => n,
@@ -499,7 +773,7 @@ async fn delete_session_run(
 
 async fn delete_saved_file(
     State(state): State<AppState>,
-    Path(filename): Path<String>,
+    AxumPath(filename): AxumPath<String>,
 ) -> Response {
     if !is_safe_filename(&filename) {
         return StatusCode::BAD_REQUEST.into_response();
@@ -514,10 +788,10 @@ async fn delete_saved_file(
 
     match result {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+        Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
             StatusCode::BAD_REQUEST.into_response()
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
             StatusCode::NOT_FOUND.into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),

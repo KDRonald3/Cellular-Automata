@@ -18,6 +18,7 @@
   const listEl    = document.getElementById('run-list');
   const countEl   = document.getElementById('total-count');
 
+  const resizer = document.getElementById('resizer');
   const vTag   = document.getElementById('v-tag');
   const vTitle = document.getElementById('v-title');
   const vMeta  = document.getElementById('v-meta');
@@ -46,15 +47,42 @@
     body.classList.toggle('sidebar-open');
   });
 
+  // ----- Sidebar resize -----
+  const SIDEBAR_MIN = 180;
+  const SIDEBAR_MAX = 640;
+  const savedW = localStorage.getItem('ca-sidebar-w');
+  if (savedW) document.documentElement.style.setProperty('--sidebar-w', savedW + 'px');
+
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10) || 304;
+    body.classList.add('resizing');
+
+    const onMove = (ev) => {
+      const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, startW + ev.clientX - startX));
+      document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+    };
+    const onUp = () => {
+      body.classList.remove('resizing');
+      const w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10);
+      localStorage.setItem('ca-sidebar-w', w);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
   // ----- Naming -----
   function displayName(e) {
     if (!e.fill && !e.align && !e.ic) return e.filename;
-    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrapped around ' : '';
-    return (e.generations + ' generations of rule ' + e.rule + ' ' + bnd + 'padded ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
+    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
+    return (e.generations + ' generations of rule ' + e.rule + ' ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
   }
   function shortName(e) {
-    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap ' : '';
-    return e.generations + ' gens · ' + bnd + 'padded ' + e.fill + ' ' + e.align + ' ' + e.ic;
+    const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
+    return 'rule ' + e.rule + ' ' + e.generations + ' gens · ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic;
   }
 
   // ----- Sort -----
