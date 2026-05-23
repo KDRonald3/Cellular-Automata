@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Base-10 to Binary Weighted Sum</title>
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --text-sm: clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+      --text-base: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+      --text-lg: clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+      --text-xl: clamp(1.5rem, 1.2rem + 1.25vw, 2.25rem);
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-6: 1.5rem;
+      --space-8: 2rem;
+      --space-12: 3rem;
+      --radius-md: 0.5rem;
+      --radius-lg: 0.75rem;
+      --radius-full: 9999px;
+      --color-bg: #f7f6f2;
+      --color-surface: #fbfbf9;
+      --color-surface-2: #f3f0ec;
+      --color-border: #d4d1ca;
+      --color-text: #28251d;
+      --color-text-muted: #6f6d67;
+      --color-primary: #01696f;
+      --color-primary-hover: #0c4e54;
+      --color-primary-highlight: #cedcd8;
+      --shadow-md: 0 10px 30px rgba(40, 37, 29, 0.08);
+      --font-body: 'Satoshi', system-ui, sans-serif;
+    }
+
+    [data-theme="dark"] {
+      --color-bg: #171614;
+      --color-surface: #1c1b19;
+      --color-surface-2: #22211f;
+      --color-border: #393836;
+      --color-text: #cdccca;
+      --color-text-muted: #918f8a;
+      --color-primary: #4f98a3;
+      --color-primary-hover: #68aeb8;
+      --color-primary-highlight: #313b3b;
+      --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.3);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      line-height: 1.6;
+      color: var(--color-text);
+      background: radial-gradient(circle at top, var(--color-primary-highlight), transparent 35%), var(--color-bg);
+      display: grid;
+      place-items: center;
+      padding: var(--space-6);
+    }
+
+    .app {
+      width: min(760px, 100%);
+      background: var(--color-surface);
+      border: 1px solid rgba(40, 37, 29, 0.12);
+      border-color: var(--color-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+      padding: clamp(var(--space-6), 4vw, var(--space-12));
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: var(--space-4);
+      margin-bottom: var(--space-8);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: var(--text-xl);
+      line-height: 1.1;
+    }
+
+    .muted { color: var(--color-text-muted); }
+
+    .theme-toggle {
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: var(--radius-full);
+      border: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+      color: var(--color-text);
+      cursor: pointer;
+    }
+
+    .grid {
+      display: grid;
+      gap: var(--space-6);
+    }
+
+    label {
+      display: block;
+      margin-bottom: var(--space-2);
+      font-weight: 700;
+    }
+
+    input {
+      width: 100%;
+      padding: 0.95rem 1rem;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+      color: var(--color-text);
+      font: inherit;
+    }
+
+    .actions {
+      display: flex;
+      gap: var(--space-3);
+      flex-wrap: wrap;
+    }
+
+    button.action {
+      min-height: 44px;
+      padding: 0.8rem 1.1rem;
+      border: 0;
+      border-radius: var(--radius-md);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .primary {
+      background: var(--color-primary);
+      color: white;
+    }
+
+    .primary:hover { background: var(--color-primary-hover); }
+
+    .secondary {
+      background: var(--color-surface-2);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+
+    .panel {
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-6);
+    }
+
+    .result {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: var(--space-4);
+      margin-bottom: var(--space-6);
+    }
+
+    .metric {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-4);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: var(--text-sm);
+      color: var(--color-text-muted);
+      margin-bottom: var(--space-2);
+    }
+
+    .metric span {
+      font-size: var(--text-lg);
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: var(--radius-md);
+    }
+
+    th, td {
+      text-align: left;
+      padding: 0.8rem;
+      border-bottom: 1px solid var(--color-border);
+      font-size: var(--text-sm);
+    }
+
+    th { color: var(--color-text-muted); }
+    tr:last-child td { border-bottom: 0; }
+    .error { color: #b00020; font-weight: 700; }
+
+    code {
+      background: rgba(127, 127, 127, 0.12);
+      padding: 0.15rem 0.4rem;
+      border-radius: 0.35rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="topbar">
+      <div>
+        <h1>Binary weighted sum</h1>
+        <p class="muted">Enter a base-10 integer, convert it to base 2, then apply your rule in base 10.</p>
+      </div>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch theme">◐</button>
+    </div>
+
+    <section class="grid" aria-label="Calculator">
+      <div>
+        <label for="decimalInput">Base-10 input</label>
+        <input id="decimalInput" type="number" step="1" placeholder="Example: 13" />
+      </div>
+
+      <div class="actions">
+        <button class="action primary" id="computeBtn" type="button">Compute</button>
+        <button class="action secondary" id="exampleBtn" type="button">Load example</button>
+      </div>
+
+      <div id="message" class="muted">Rule used: binary is zero-padded to at least 4 bits. The <em>last</em> digit gets multiplied by 3, and each earlier digit gets multiplied by <code>3 × 4^i</code> where <code>i</code> counts from the right.</div>
+
+      <div class="panel">
+        <div class="result">
+          <div class="metric">
+            <strong>Binary form</strong>
+            <span id="binaryOut">—</span>
+          </div>
+          <div class="metric">
+            <strong>Weighted base-10 result</strong>
+            <span id="sumOut">—</span>
+          </div>
+        </div>
+
+        <table aria-label="Digit breakdown">
+          <thead>
+            <tr>
+              <th>Digit position</th>
+              <th>Binary digit</th>
+              <th>Multiplier</th>
+              <th>Product</th>
+            </tr>
+          </thead>
+          <tbody id="stepsBody">
+            <tr><td colspan="4" class="muted">No computation yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const input = document.getElementById('decimalInput');
+    const binaryOut = document.getElementById('binaryOut');
+    const sumOut = document.getElementById('sumOut');
+    const stepsBody = document.getElementById('stepsBody');
+    const message = document.getElementById('message');
+    const computeBtn = document.getElementById('computeBtn');
+    const exampleBtn = document.getElementById('exampleBtn');
+    const themeToggle = document.querySelector('[data-theme-toggle]');
+    const root = document.documentElement;
+
+    let theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    root.setAttribute('data-theme', theme);
+
+    themeToggle.addEventListener('click', () => {
+      theme = theme === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', theme);
+    });
+
+    function computeWeightedValue(decimalValue) {
+      const rawBinary = decimalValue.toString(2);
+      const minBits = Math.max(4, rawBinary.length);
+      const binary = rawBinary.padStart(minBits, '0');
+      const digits = binary.split('').map(Number);
+      const steps = digits.map((digit, index) => {
+        const reverseIndex = digits.length - 1 - index;
+        const multiplier = reverseIndex === 0 ? 3 : 3 * (4 ** reverseIndex);
+        return {
+          position: index + 1,
+          digit,
+          multiplier,
+          product: digit * multiplier
+        };
+      });
+      const total = steps.reduce((acc, step) => acc + step.product, 0);
+      return { binary, steps, total };
+    }
+
+    function renderResult() {
+      const raw = input.value.trim();
+      if (raw === '') {
+        message.innerHTML = 'Please enter a whole base-10 number.';
+        message.className = 'error';
+        binaryOut.textContent = '—';
+        sumOut.textContent = '—';
+        stepsBody.innerHTML = '<tr><td colspan="4" class="muted">No computation yet.</td></tr>';
+        return;
+      }
+
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value < 0) {
+        message.innerHTML = 'Use a non-negative integer only.';
+        message.className = 'error';
+        binaryOut.textContent = '—';
+        sumOut.textContent = '—';
+        stepsBody.innerHTML = '<tr><td colspan="4" class="muted">Invalid input.</td></tr>';
+        return;
+      }
+
+      const { binary, steps, total } = computeWeightedValue(value);
+      message.className = 'muted';
+      message.innerHTML = 'Binary zero-padded to at least 4 bits. The <em>last</em> digit uses <code>3</code>; each earlier digit uses <code>3 × 4^i</code> with <code>i = 1, 2, 3, ...</code> counting from the right.';
+      binaryOut.textContent = binary;
+      sumOut.textContent = total.toString();
+      stepsBody.innerHTML = steps.map(step => `
+        <tr>
+          <td>${step.position}</td>
+          <td>${step.digit}</td>
+          <td>${step.multiplier}</td>
+          <td>${step.product}</td>
+        </tr>
+      `).join('');
+    }
+
+    computeBtn.addEventListener('click', renderResult);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') renderResult();
+    });
+    exampleBtn.addEventListener('click', () => {
+      input.value = 13;
+      renderResult();
+    });
+  </script>
+</body>
+</html>

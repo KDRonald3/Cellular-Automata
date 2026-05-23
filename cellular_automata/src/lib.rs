@@ -57,7 +57,8 @@
 //! - [`OutputKind::Svg`] — returns a self-contained SVG string. Drop it
 //!   into a paper, a slide, or Inkscape.
 //! - [`OutputKind::Html { dir }`] — writes a stand-alone HTML page with an
-//!   interactive cell-size slider and a borders toggle. Good for sharing.
+//!   interactive cell-size slider, a borders toggle, and a `manifest.tsv`
+//!   + `index.html` gallery alongside it. Good for sharing.
 //!
 //! ## Performance notes
 //!
@@ -71,6 +72,9 @@ pub mod export;
 pub mod json;
 pub mod sim;
 pub mod svg;
+
+pub use export::delete_saved_run;
+pub use export::save_result_if_unique;
 
 pub use sim::{
     check_explicit_row, make_initial_row, step_row, step_row_into, BoundaryMode,
@@ -309,9 +313,9 @@ pub fn run(
     }
 }
 
-/// Save an already-computed [`SimulationResult`] to an HTML file in `dir`.
-/// Equivalent to calling `run(..., OutputKind::Html { dir })` but skips
-/// re-running the simulation.
+/// Save an already-computed [`SimulationResult`] to an HTML file in `dir`,
+/// updating the manifest and gallery index. Equivalent to calling
+/// `run(..., OutputKind::Html { dir })` but skips re-running the simulation.
 pub fn save_result(
     result: &SimulationResult,
     render: &RenderOptions,

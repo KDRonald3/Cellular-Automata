@@ -34,16 +34,12 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     display: grid;
-    grid-template-columns: 0px 0px 1fr;
+    grid-template-columns: 0px 1fr;
     grid-template-rows: 100%;
     transition: grid-template-columns 260ms cubic-bezier(.4,.0,.2,1);
     overflow: hidden;
   }
-  body.sidebar-open { grid-template-columns: var(--sidebar-w) 6px 1fr; }
-  body.resizing { transition: none !important; user-select: none; cursor: col-resize; }
-  #resizer { display: none; cursor: col-resize; border-left: 1px solid var(--rule); background: transparent; transition: background 150ms; }
-  body.sidebar-open #resizer { display: block; }
-  #resizer:hover, body.resizing #resizer { background: var(--accent-br); }
+  body.sidebar-open { grid-template-columns: var(--sidebar-w) 1fr; }
   aside#sidebar {
     overflow: hidden;
     background: var(--bg-sunk);
@@ -201,7 +197,7 @@
     <nav id="run-list"></nav>
   </div>
 </aside>
-<div id="resizer"></div>
+
 <main id="main">
   <header class="topbar">
     <button id="toggle" title="Toggle sidebar" aria-label="Toggle sidebar">
