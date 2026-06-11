@@ -750,9 +750,13 @@
 
   function restoreActiveState() {
     if (!activeFilename) return;
-    const sel = '[data-filename="' + activeFilename.replace(/"/g, '\\"') + '"]';
+    // Avoid building a CSS selector by string concatenation — CSS special
+    // characters in the filename (e.g. `]`, `\`) would break querySelector
+    // and throw. Compare via getAttribute instead.
     for (const container of [listEl, document.getElementById('pinned-body')]) {
-      const el = container && container.querySelector(sel);
+      if (!container) continue;
+      const el = Array.from(container.querySelectorAll('[data-filename]'))
+        .find(n => n.getAttribute('data-filename') === activeFilename);
       if (el) { activeEl = el; el.classList.add('active'); return; }
     }
     activeEl = null;
@@ -1246,7 +1250,10 @@
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving…';
     try {
-      const resp = await fetch('/api/runs/' + id + '/save', { method: 'POST' });
+      const resp = await fetch('/api/runs/' + id + '/save', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'fetch' },
+      });
       if (resp.status === 409) {
         saveBtn.disabled = false;
         saveBtn.textContent = 'Already saved';
@@ -1333,7 +1340,10 @@
   function autoLoadFromHash() {
     const hash = decodeURIComponent(location.hash.slice(1));
     if (!hash) return;
-    const div = listEl.querySelector('[data-filename="' + hash.replace(/"/g, '\\"') + '"]');
+    // Same getAttribute comparison as restoreActiveState — the hash is
+    // attacker-influenced (any page can link here with a crafted #fragment).
+    const div = Array.from(listEl.querySelectorAll('[data-filename]'))
+      .find(n => n.getAttribute('data-filename') === hash);
     if (div) div.click();
   }
 

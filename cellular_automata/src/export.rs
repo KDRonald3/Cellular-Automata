@@ -65,7 +65,7 @@ pub(crate) fn export_job(input: &ExportInput, dir: &Path) -> io::Result<PathBuf>
 fn render_run_html(input: &ExportInput, exported_at: &str, ic: &str) -> String {
     let rows = input.rows;
     let width = input.width;
-    let height = if width == 0 { 0 } else { rows.len() / width };
+    let height = rows.len().checked_div(width).unwrap_or(0);
     // Clamp border_width to a finite value before embedding in JSON.
     let safe_bw: f32 = if input.border_width.is_finite() {
         input.border_width.max(0.0)
@@ -76,19 +76,11 @@ fn render_run_html(input: &ExportInput, exported_at: &str, ic: &str) -> String {
     let align_str = align_label(input.padding_align);
     let cs = (1600usize / width.max(1)).clamp(1, 16);
 
-    let tile_max_rows_by_cells = if width == 0 {
-        1
-    } else {
-        (MAX_EXPORT_CELLS / width).max(1)
-    };
+    let tile_max_rows_by_cells = MAX_EXPORT_CELLS.checked_div(width).unwrap_or(1).max(1);
     let tile_max_rows = tile_max_rows_by_cells
         .min(MAX_EXPORT_HEIGHT / cs.max(1))
         .max(1);
-    let num_tiles = if height == 0 {
-        0
-    } else {
-        (height + tile_max_rows - 1) / tile_max_rows
-    };
+    let num_tiles = height.div_ceil(tile_max_rows);
 
     let mut tile_meta_entries: Vec<String> = Vec::with_capacity(num_tiles);
     let mut tile_scripts = String::new();

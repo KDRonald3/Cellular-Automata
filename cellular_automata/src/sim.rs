@@ -275,6 +275,14 @@ pub fn step_row_into(rule: &Rule, prev: &[u8], next: &mut [u8], boundary: Bounda
         return;
     }
     let fill = boundary_fill & 1;
+    // Shared interior: cell i (1..width-1) sees the window prev[i-1..=i+1].
+    // Iterating `windows(3)` zipped with `next[1..]` keeps the inner loop
+    // free of per-cell bounds checks, unlike indexed `prev[i - 1]` access.
+    let step_interior = |next: &mut [u8]| {
+        for (n, w) in next[1..width - 1].iter_mut().zip(prev.windows(3)) {
+            *n = rule.apply(w[0], w[1], w[2]);
+        }
+    };
     match boundary {
         BoundaryMode::ZeroPadded => {
             if width == 1 {
@@ -282,9 +290,7 @@ pub fn step_row_into(rule: &Rule, prev: &[u8], next: &mut [u8], boundary: Bounda
             } else {
                 // Peel first and last so the inner loop has no branch per cell.
                 next[0] = rule.apply(fill, prev[0], prev[1]);
-                for i in 1..width - 1 {
-                    next[i] = rule.apply(prev[i - 1], prev[i], prev[i + 1]);
-                }
+                step_interior(next);
                 next[width - 1] = rule.apply(prev[width - 2], prev[width - 1], fill);
             }
         }
@@ -295,9 +301,7 @@ pub fn step_row_into(rule: &Rule, prev: &[u8], next: &mut [u8], boundary: Bounda
                 return;
             }
             next[0] = rule.apply(prev[width - 1], prev[0], prev[1]);
-            for i in 1..width - 1 {
-                next[i] = rule.apply(prev[i - 1], prev[i], prev[i + 1]);
-            }
+            step_interior(next);
             next[width - 1] = rule.apply(prev[width - 2], prev[width - 1], prev[0]);
         }
     }

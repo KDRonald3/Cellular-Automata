@@ -23,7 +23,8 @@ for BOUNDARY in "ZeroPadded" "Wrap"; do
       continue
     fi
 
-    SAVE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/runs/$ID/save")
+    SAVE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+      -H "X-Requested-With: batch_run" "$BASE/api/runs/$ID/save")
 
     if [ "$SAVE" = "200" ]; then
       echo "SAVED rule=$RULE boundary=$BOUNDARY"

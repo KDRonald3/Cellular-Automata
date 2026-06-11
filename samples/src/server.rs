@@ -7,12 +7,14 @@ use std::sync::{Arc, Mutex};
 
 use axum::{
     Router,
-    extract::{DefaultBodyLimit, Path as AxumPath, State},
-    http::{HeaderValue, StatusCode, header},
+    extract::{DefaultBodyLimit, Path as AxumPath, Request, State},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json,
 };
+use tokio::sync::Semaphore;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use cellular_automata::{
@@ -30,6 +32,14 @@ const MAX_SESSIONS: usize = 1_000;
 const MAX_WIDTH: usize = 10_000;
 const MAX_GENERATIONS: usize = 100_000;
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// Upper bound on cells retained across *all* in-memory session runs. A
+/// single run can be up to 500 M cells, so MAX_SESSIONS alone would allow
+/// hundreds of GB of retained grids; this caps the total instead.
+const MAX_TOTAL_SESSION_CELLS: usize = 2_000_000_000;
+/// Simulations are CPU-bound; without a cap each request gets its own
+/// blocking thread (tokio allows hundreds), so a burst of large requests
+/// can exhaust CPU and memory before the session cap is even checked.
+const MAX_CONCURRENT_SIMULATIONS: usize = 4;
 
 const MANIFEST_FILE: &str = "manifest.tsv";
 const INDEX_FILE: &str = "index.html";
@@ -242,7 +252,7 @@ fn save_result_if_unique(
     }
 
     let path = save_result(result, opts, dir, fill, align)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     let filename = path
         .file_name()
@@ -262,7 +272,7 @@ fn save_result_if_unique(
         status:     "Done".to_string(),
         progress:   result.generations.to_string(),
         timestamp:  ts_human,
-        filename:   filename,
+        filename,
         fill:       fill_str.to_string(),
         align:      align_str.to_string(),
         ic,
@@ -278,10 +288,10 @@ fn delete_saved_run(dir: &Path, filename: &str) -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "unsafe filename"));
     }
     let _guard = MANIFEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    if let Err(e) = fs::remove_file(dir.join(filename)) {
-        if e.kind() != io::ErrorKind::NotFound {
-            return Err(e);
-        }
+    if let Err(e) = fs::remove_file(dir.join(filename))
+        && e.kind() != io::ErrorKind::NotFound
+    {
+        return Err(e);
     }
     let manifest_path = dir.join(MANIFEST_FILE);
     if manifest_path.exists() {
@@ -305,11 +315,55 @@ fn delete_saved_run(dir: &Path, filename: &str) -> io::Result<()> {
 // ── Tile packing ──────────────────────────────────────────────────────────────
 
 fn is_safe_filename(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 200
-        && name
+    if name.is_empty()
+        || name.len() > 200
+        || !name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
+        // Reject names with no alphanumeric at all — this excludes "." and
+        // ".." (which `Path::join` would resolve to the runs dir or its
+        // parent) without restricting any real exported filename.
+        || !name.bytes().any(|b| b.is_ascii_alphanumeric())
+    {
+        return false;
+    }
+    // Windows maps reserved device names (optionally with an extension,
+    // e.g. "CON.html") to devices; reading one can block the request task.
+    let stem = name.split('.').next().unwrap_or(name);
+    const RESERVED: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    !RESERVED.iter().any(|r| stem.eq_ignore_ascii_case(r))
+}
+
+/// True if a `Host` header names this machine. Requests from a hostile
+/// website via DNS rebinding carry the attacker's hostname here, so anything
+/// other than a loopback name is rejected before reaching a handler.
+fn host_is_local(host: &str) -> bool {
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        // IPv6 literal: "[::1]:3000" → "::1"
+        match rest.split_once(']') {
+            Some((ip, _)) => ip,
+            None => return false,
+        }
+    } else {
+        host.rsplit_once(':').map_or(host, |(n, _)| n)
+    };
+    name.eq_ignore_ascii_case("localhost") || name == "127.0.0.1" || name == "::1"
+}
+
+async fn require_local_host(req: Request, next: Next) -> Response {
+    let host_ok = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .is_some_and(host_is_local);
+    if !host_ok {
+        return (StatusCode::FORBIDDEN, "invalid Host header").into_response();
+    }
+    next.run(req).await
 }
 
 fn pack_bits_range(rows: &[u8], width: usize, start_row: usize, end_row: usize) -> Vec<u8> {
@@ -409,6 +463,8 @@ struct SessionRun {
 struct AppState {
     session: Arc<Mutex<HashMap<u64, SessionRun>>>,
     runs_dir: PathBuf,
+    /// Limits concurrent CPU-bound simulations; excess requests queue.
+    sim_permits: Arc<Semaphore>,
 }
 
 // ── Serde types ───────────────────────────────────────────────────────────────
@@ -528,14 +584,14 @@ fn compute_tile_data(
     padding_align: PaddingAlign,
 ) -> (CanvasMeta, Vec<TilePayload>) {
     let width = result.width;
-    let height = if width == 0 { 0 } else { result.rows.len() / width };
-    let cs = if width == 0 { 1 } else { (1600usize / width.max(1)).clamp(1, 16) };
+    let height = result.rows.len().checked_div(width).unwrap_or(0);
+    let cs = (1600usize.checked_div(width).unwrap_or(1)).clamp(1, 16);
 
-    let tile_max_rows_by_cells = if width == 0 { 1 } else { (MAX_EXPORT_CELLS / width).max(1) };
+    let tile_max_rows_by_cells = MAX_EXPORT_CELLS.checked_div(width).unwrap_or(1).max(1);
     let tile_max_rows = tile_max_rows_by_cells
         .min(MAX_EXPORT_HEIGHT / cs.max(1))
         .max(1);
-    let num_tiles = if height == 0 { 0 } else { (height + tile_max_rows - 1) / tile_max_rows };
+    let num_tiles = height.div_ceil(tile_max_rows);
 
     let ic = if width == 0 || result.rows.is_empty() {
         "0".to_string()
@@ -589,7 +645,10 @@ async fn get_manifest(State(state): State<AppState>) -> Response {
     let path = state.runs_dir.join("manifest.tsv");
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => (
-            [(header::CONTENT_TYPE, HeaderValue::from_static("text/tab-separated-values; charset=utf-8"))],
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("text/tab-separated-values; charset=utf-8")),
+                (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+            ],
             content,
         ).into_response(),
         Err(_) => (StatusCode::OK, "").into_response(),
@@ -606,7 +665,10 @@ async fn get_run_file(
     let path = state.runs_dir.join(&filename);
     match tokio::fs::read(&path).await {
         Ok(bytes) => (
-            [(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"))],
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8")),
+                (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+            ],
             bytes,
         ).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
@@ -658,6 +720,13 @@ async fn post_run(
         border_width: req.border_width.unwrap_or(1.0),
     };
 
+    // Holding the permit across the blocking task bounds both CPU use and
+    // the transient memory of simulations that are not yet session-tracked.
+    let _permit = match state.sim_permits.clone().acquire_owned().await {
+        Ok(p) => p,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
     let result = match tokio::task::spawn_blocking(move || {
         run(config, initial, render, OutputKind::Structured)
     })
@@ -686,6 +755,14 @@ async fn post_run(
         if lock.len() >= MAX_SESSIONS {
             return (StatusCode::TOO_MANY_REQUESTS, "session limit reached").into_response();
         }
+        let retained_cells: usize = lock.values().map(|s| s.result.rows.len()).sum();
+        if retained_cells.saturating_add(result.rows.len()) > MAX_TOTAL_SESSION_CELLS {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "session memory limit reached; remove some session runs and retry",
+            )
+                .into_response();
+        }
         lock.insert(id, SessionRun {
             result: Arc::new(result),
             render,
@@ -713,7 +790,15 @@ async fn post_run(
 async fn post_save_run(
     State(state): State<AppState>,
     AxumPath(id_str): AxumPath<String>,
+    headers: HeaderMap,
 ) -> Response {
+    // A body-less POST is a CORS "simple request" that browsers send
+    // cross-origin without preflight. Requiring a custom header forces a
+    // preflight (which fails — no CORS layer), so only same-origin callers
+    // and non-browser clients like curl can save.
+    if !headers.contains_key("x-requested-with") {
+        return (StatusCode::FORBIDDEN, "missing X-Requested-With header").into_response();
+    }
     let id: u64 = match id_str.parse() {
         Ok(n) => n,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -804,6 +889,7 @@ pub fn build_router(runs_dir: PathBuf) -> Router {
     let state = AppState {
         session: Arc::new(Mutex::new(HashMap::new())),
         runs_dir,
+        sim_permits: Arc::new(Semaphore::new(MAX_CONCURRENT_SIMULATIONS)),
     };
     Router::new()
         .route("/", get(get_index))
@@ -814,5 +900,54 @@ pub fn build_router(runs_dir: PathBuf) -> Router {
         .route("/api/runs/:id", delete(delete_session_run))
         .route("/api/saved/:filename", delete(delete_saved_file))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
+        .layer(middleware::from_fn(require_local_host))
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_filename_accepts_exported_names() {
+        assert!(is_safe_filename("rule030_w401_g100_padded_20260611_120000_job1.html"));
+        assert!(is_safe_filename("a-b_c.1.html"));
+    }
+
+    #[test]
+    fn safe_filename_rejects_traversal_and_separators() {
+        assert!(!is_safe_filename(""));
+        assert!(!is_safe_filename("."));
+        assert!(!is_safe_filename(".."));
+        assert!(!is_safe_filename("..."));
+        assert!(!is_safe_filename("a/b.html"));
+        assert!(!is_safe_filename("a\\b.html"));
+        assert!(!is_safe_filename("..\\x.html"));
+        assert!(!is_safe_filename(&"a".repeat(201)));
+    }
+
+    #[test]
+    fn safe_filename_rejects_windows_device_names() {
+        assert!(!is_safe_filename("CON"));
+        assert!(!is_safe_filename("con.html"));
+        assert!(!is_safe_filename("Nul.html"));
+        assert!(!is_safe_filename("COM1.html"));
+        assert!(!is_safe_filename("lpt9"));
+        // Similar-looking but legal names stay allowed.
+        assert!(is_safe_filename("CONFIG.html"));
+        assert!(is_safe_filename("COM10.html"));
+    }
+
+    #[test]
+    fn host_header_check_accepts_loopback_only() {
+        assert!(host_is_local("127.0.0.1:3000"));
+        assert!(host_is_local("127.0.0.1"));
+        assert!(host_is_local("localhost:3000"));
+        assert!(host_is_local("LOCALHOST"));
+        assert!(host_is_local("[::1]:3000"));
+        assert!(!host_is_local("evil.example.com:3000"));
+        assert!(!host_is_local("localhost.evil.com:3000"));
+        assert!(!host_is_local("[2001:db8::1]:3000"));
+        assert!(!host_is_local(""));
+    }
 }
