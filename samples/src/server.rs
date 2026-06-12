@@ -220,7 +220,7 @@ fn save_result_if_unique(
     let ic = if result.width == 0 || result.rows.is_empty() {
         "0".to_string()
     } else {
-        compute_ic(&result.rows[0..result.width])
+        compute_ic_with_fill(&result.rows[0..result.width], fill)
     };
     let rule_str     = result.config.rule.to_string();
     let width_str    = result.width.to_string();
@@ -409,6 +409,20 @@ fn pack_bits_range(rows: &[u8], width: usize, start_row: usize, end_row: usize) 
         }
     }
     out
+}
+
+/// IC for naming purposes, fill-aware: with a fill of 1 the row is mostly
+/// ones, so the raw binary value says nothing about the seed. Bitwise-NOT
+/// the row first so the IC describes the pattern against its background;
+/// with a fill of 0 this is plain `compute_ic`.
+fn compute_ic_with_fill(row: &[u8], fill: PaddingFill) -> String {
+    match fill {
+        PaddingFill::Zero => compute_ic(row),
+        PaddingFill::One => {
+            let notted: Vec<u8> = row.iter().map(|&b| (b & 1) ^ 1).collect();
+            compute_ic(&notted)
+        }
+    }
 }
 
 fn compute_ic(row: &[u8]) -> String {
@@ -600,7 +614,7 @@ fn compute_tile_data(
     let ic = if width == 0 || result.rows.is_empty() {
         "0".to_string()
     } else {
-        compute_ic(&result.rows[0..width])
+        compute_ic_with_fill(&result.rows[0..width], padding_fill)
     };
 
     let mut tile_metas = Vec::with_capacity(num_tiles);
@@ -982,6 +996,13 @@ mod tests {
         // Similar-looking but legal names stay allowed.
         assert!(is_safe_filename("CONFIG.html"));
         assert!(is_safe_filename("COM10.html"));
+    }
+
+    #[test]
+    fn compute_ic_with_fill_one_nots_the_row() {
+        assert_eq!(compute_ic_with_fill(&[1, 1, 0, 1, 1], PaddingFill::One), "1");
+        assert_eq!(compute_ic_with_fill(&[1, 1, 1], PaddingFill::One), "0");
+        assert_eq!(compute_ic_with_fill(&[0, 1, 1, 0], PaddingFill::Zero), "3");
     }
 
     #[test]

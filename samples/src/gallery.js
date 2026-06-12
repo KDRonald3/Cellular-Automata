@@ -40,6 +40,25 @@
   let curTiles = [];
   let activeEl = null;
 
+  // Multi-select needs the delete API, which only exists when the gallery is
+  // served by the app (not opened from disk). Old exported index.html pages
+  // may also lack the #sel-bar markup.
+  const canSelect = location.protocol !== 'file:' && !!document.getElementById('sel-bar');
+  const selected = new Set(); // filenames
+
+  function updateSelBar() {
+    if (!canSelect) return;
+    document.getElementById('sel-count').textContent = selected.size + ' selected';
+    document.getElementById('sel-bar').classList.toggle('open', selected.size > 0);
+  }
+  function syncSelChecks() {
+    for (const el of listEl.querySelectorAll('.run-entry')) {
+      const box = el.querySelector('.sel-box');
+      if (box) box.checked = selected.has(el.getAttribute('data-filename'));
+    }
+    updateSelBar();
+  }
+
   const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
   // ----- Sidebar toggle -----
@@ -135,12 +154,25 @@
       grpBody.className = 'group-body';
       for (const e of ruleEntries) {
         const row = document.createElement('div');
-        row.className = 'run-entry';
+        row.className = 'run-entry' + (canSelect ? ' selectable' : '');
         row.setAttribute('data-filename', e.filename);
         row.title = 'Rule ' + String(rule).padStart(3, '0') + ' · ' + shortName(e);
         row.innerHTML =
           '<span class="run-name">' + esc(shortName(e)) + '</span>' +
           '<span class="run-meta">#' + esc(e.id) + '</span>';
+        if (canSelect) {
+          const box = document.createElement('input');
+          box.type = 'checkbox';
+          box.className = 'sel-box';
+          box.title = 'Select run';
+          box.checked = selected.has(e.filename);
+          box.addEventListener('click', (ev) => ev.stopPropagation());
+          box.addEventListener('change', () => {
+            if (box.checked) selected.add(e.filename); else selected.delete(e.filename);
+            updateSelBar();
+          });
+          row.prepend(box);
+        }
         row.addEventListener('click', () => loadRun(e, row));
         grpBody.appendChild(row);
       }
@@ -148,6 +180,30 @@
       listEl.appendChild(det);
     }
     countEl.textContent = total;
+
+    // Drop selections that no longer exist after a rebuild.
+    const live = new Set(entries.map(e => e.filename));
+    for (const f of [...selected]) if (!live.has(f)) selected.delete(f);
+    updateSelBar();
+  }
+
+  // ----- Bulk delete -----
+  if (canSelect) {
+    document.getElementById('sel-clear').addEventListener('click', () => {
+      selected.clear();
+      syncSelChecks();
+    });
+    document.getElementById('sel-delete').addEventListener('click', async () => {
+      const files = [...selected];
+      if (!files.length) return;
+      const noun = files.length === 1 ? 'run' : 'runs';
+      if (!confirm('Delete ' + files.length + ' saved ' + noun + '? Their files will be removed.')) return;
+      await Promise.all(files.map(f =>
+        fetch('/api/saved/' + encodeURIComponent(f), { method: 'DELETE' }).catch(() => {})
+      ));
+      selected.clear();
+      init(); // refetch the manifest and rebuild the sidebar
+    });
   }
 
   // ----- Filter -----

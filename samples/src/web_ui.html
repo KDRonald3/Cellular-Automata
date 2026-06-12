@@ -110,7 +110,7 @@
   .rule-count { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.04em; }
   .group-body { padding: 0 8px 8px; }
   .run-entry {
-    display: grid; grid-template-columns: 1fr auto auto; align-items: center;
+    display: grid; grid-template-columns: auto 1fr auto auto; align-items: center;
     column-gap: 6px; padding: 7px 10px 8px 10px; margin: 1px 0;
     border-radius: 7px; cursor: pointer; transition: background 100ms;
   }
@@ -135,7 +135,7 @@
 
   /* Session entries */
   .session-entry {
-    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center;
     column-gap: 4px; padding: 6px 8px 6px 10px; margin: 1px 0;
     border-radius: 7px; cursor: pointer; transition: background 100ms;
   }
@@ -186,6 +186,15 @@
   .btn-sm:disabled { opacity: 0.45; cursor: default; pointer-events: none; }
   .btn-sm.danger { color: oklch(42% 0.14 22); border-color: oklch(80% 0.06 22); }
   .btn-sm.danger:hover { background: oklch(96% 0.025 22); }
+
+  /* Multi-select: per-entry checkbox (dimmed until hover/checked, like the
+     kebab menus) and an action bar that appears once something is selected. */
+  .sel-box { width: 13px; height: 13px; accent-color: var(--ink); cursor: pointer; opacity: 0.45; margin: 0; }
+  .run-entry:hover .sel-box, .session-entry:hover .sel-box, .sel-box:checked { opacity: 1; }
+  .sel-bar { display: none; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .sel-bar.open { display: flex; }
+  .sel-count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-right: auto; }
+  #sel-bar-sim { margin: 8px 14px 0; }
 
   /* Main layout */
   main#main { grid-column: 3; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--bg); }
@@ -478,6 +487,13 @@
         <div class="filter-wrap">
           <input id="filter" placeholder="Filter or rule #…" autocomplete="off" spellcheck="false">
         </div>
+        <div id="sel-bar-home" class="sel-bar">
+          <span class="sel-count" id="sel-count-home">0 selected</span>
+          <button class="btn-sm" id="sel-pin" type="button">Pin</button>
+          <button class="btn-sm" id="sel-unpin" type="button">Unpin</button>
+          <button class="btn-sm danger" id="sel-delete" type="button">Delete</button>
+          <button class="btn-sm" id="sel-clear" type="button">Clear</button>
+        </div>
       </div>
       <div id="sidebar-scroll">
         <details id="pinned-section" style="display:none">
@@ -557,6 +573,12 @@
         <div class="sb-section-head">
           <span class="sb-section-title">This session</span>
           <span id="session-count" style="display:none">0</span>
+        </div>
+        <div id="sel-bar-sim" class="sel-bar">
+          <span class="sel-count" id="sel-count-sim">0 selected</span>
+          <button class="btn-sm" id="sel-save" type="button">Save</button>
+          <button class="btn-sm danger" id="sel-remove" type="button">Remove</button>
+          <button class="btn-sm" id="sel-clear-sim" type="button">Clear</button>
         </div>
         <div class="sim-filter-outer">
           <div class="filter-wrap">
@@ -690,6 +712,36 @@
   // ── Pin state (persisted) ─────────────────────────────────────────────────
   let pinnedRules = new Set(JSON.parse(localStorage.getItem('ca-pinned-rules') || '[]'));
   let pinnedRuns  = new Set(JSON.parse(localStorage.getItem('ca-pinned-runs')  || '[]'));
+
+  // ── Multi-select state ────────────────────────────────────────────────────
+  const selectedSaved = new Set();    // saved-run filenames
+  const selectedSessions = new Set(); // session-run ids
+
+  function updateSelBars() {
+    document.getElementById('sel-count-home').textContent = selectedSaved.size + ' selected';
+    document.getElementById('sel-bar-home').classList.toggle('open', selectedSaved.size > 0);
+    document.getElementById('sel-count-sim').textContent = selectedSessions.size + ' selected';
+    document.getElementById('sel-bar-sim').classList.toggle('open', selectedSessions.size > 0);
+  }
+  // A run can be rendered twice (pinned section + main list), so checked
+  // state is synced from the selection set rather than per-checkbox.
+  function syncSavedCheckboxes() {
+    for (const el of document.querySelectorAll('.run-entry')) {
+      const box = el.querySelector('.sel-box');
+      if (box) box.checked = selectedSaved.has(el.getAttribute('data-filename'));
+    }
+    updateSelBars();
+  }
+  function makeSelBox(initialChecked, onChange) {
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'sel-box';
+    box.title = 'Select run';
+    box.checked = initialChecked;
+    box.addEventListener('click', (ev) => ev.stopPropagation());
+    box.addEventListener('change', () => onChange(box.checked));
+    return box;
+  }
 
   function savePins() {
     localStorage.setItem('ca-pinned-rules', JSON.stringify([...pinnedRules]));
@@ -832,6 +884,11 @@
     row.className = 'run-entry' + (isPinned ? ' is-pinned' : '');
     row.setAttribute('data-filename', e.filename);
 
+    const selBox = makeSelBox(selectedSaved.has(e.filename), (checked) => {
+      if (checked) selectedSaved.add(e.filename); else selectedSaved.delete(e.filename);
+      syncSavedCheckboxes();
+    });
+
     const nameSpan = document.createElement('span');
     nameSpan.className = 'run-name';
     // The rule group header already says which rule this is.
@@ -888,6 +945,7 @@
     popup.appendChild(delItem);
     menuWrap.appendChild(menuBtn);
     menuWrap.appendChild(popup);
+    row.appendChild(selBox);
     row.appendChild(nameSpan);
     row.appendChild(metaSpan);
     row.appendChild(menuWrap);
@@ -923,6 +981,18 @@
     const popup = document.createElement('div');
     popup.className = 'ctx-popup rule-popup';
 
+    const selectItem = document.createElement('button');
+    selectItem.className = 'ctx-popup-item';
+    selectItem.type = 'button';
+    selectItem.textContent = 'Select runs';
+    selectItem.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeAllPopups();
+      for (const e of ruleEntries) selectedSaved.add(e.filename);
+      det.open = true;
+      syncSavedCheckboxes();
+    });
+
     const pinItem = document.createElement('button');
     pinItem.className = 'ctx-popup-item';
     pinItem.type = 'button';
@@ -945,6 +1015,7 @@
       if (!wasOpen) popup.classList.add('open');
     });
 
+    popup.appendChild(selectItem);
     popup.appendChild(pinItem);
     popup.appendChild(ruleSep);
     popup.appendChild(delRuleItem);
@@ -1016,6 +1087,12 @@
     }
     countEl.textContent = total;
     restoreActiveState();
+
+    // Drop selections that no longer exist (deleted elsewhere) and re-sync
+    // checkbox state across the rebuilt entries.
+    const live = new Set(entries.map(e => e.filename));
+    for (const f of [...selectedSaved]) if (!live.has(f)) selectedSaved.delete(f);
+    syncSavedCheckboxes();
   }
 
   // ── Filter ────────────────────────────────────────────────────────────────
@@ -1053,6 +1130,69 @@
     const term = this.value.toLowerCase().trim();
     for (const entry of simSessionListEl.querySelectorAll('.session-entry')) {
       entry.style.display = (!term || entry.textContent.toLowerCase().includes(term)) ? '' : 'none';
+    }
+  });
+
+  // ── Bulk actions: saved runs ──────────────────────────────────────────────
+  document.getElementById('sel-clear').addEventListener('click', () => {
+    selectedSaved.clear();
+    syncSavedCheckboxes();
+  });
+  document.getElementById('sel-pin').addEventListener('click', () => {
+    for (const f of selectedSaved) pinnedRuns.add(f);
+    savePins();
+    buildSidebar(allEntries);
+  });
+  document.getElementById('sel-unpin').addEventListener('click', () => {
+    for (const f of selectedSaved) pinnedRuns.delete(f);
+    savePins();
+    buildSidebar(allEntries);
+  });
+  document.getElementById('sel-delete').addEventListener('click', async () => {
+    const files = [...selectedSaved];
+    if (!files.length) return;
+    const noun = files.length === 1 ? 'run' : 'runs';
+    if (!confirm('Delete ' + files.length + ' saved ' + noun + '? Their files will be removed.')) return;
+    await Promise.all(files.map(f =>
+      fetch('/api/saved/' + encodeURIComponent(f), { method: 'DELETE' }).catch(() => {})
+    ));
+    for (const f of files) {
+      pinnedRuns.delete(f);
+      selectedSaved.delete(f);
+      if (activeFilename === f) clearViewer();
+    }
+    savePins();
+    await refreshSavedSidebar();
+  });
+
+  // ── Bulk actions: session runs ────────────────────────────────────────────
+  document.getElementById('sel-clear-sim').addEventListener('click', () => {
+    selectedSessions.clear();
+    for (const box of simSessionListEl.querySelectorAll('.sel-box')) box.checked = false;
+    updateSelBars();
+  });
+  document.getElementById('sel-save').addEventListener('click', async () => {
+    for (const id of [...selectedSessions]) {
+      const sr = sessionRuns[id];
+      if (!sr) continue;
+      try {
+        const resp = await fetch('/api/runs/' + id + '/save', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'fetch' },
+        });
+        if (resp.ok || resp.status === 409) {
+          sr.saveItem.textContent = 'Saved';
+          sr.saveItem.disabled = true;
+          sr.saveItem.style.color = 'oklch(46% 0.12 145)';
+        }
+      } catch {}
+    }
+    await refreshSavedSidebar();
+  });
+  document.getElementById('sel-remove').addEventListener('click', async () => {
+    for (const id of [...selectedSessions]) {
+      const sr = sessionRuns[id];
+      if (sr) await removeSessionRun(id, sr.entryEl);
     }
   });
 
@@ -1276,6 +1416,12 @@
     menuWrap.appendChild(menuBtn);
     menuWrap.appendChild(popup);
 
+    const selBox = makeSelBox(false, (checked) => {
+      if (checked) selectedSessions.add(data.id); else selectedSessions.delete(data.id);
+      updateSelBars();
+    });
+
+    entryEl.appendChild(selBox);
     entryEl.appendChild(nameSpan);
     entryEl.appendChild(menuWrap);
 
@@ -1329,9 +1475,11 @@
   async function removeSessionRun(id, entryEl) {
     await fetch('/api/runs/' + id, { method: 'DELETE' });
     delete sessionRuns[id];
+    selectedSessions.delete(id);
     entryEl.remove();
     if (activeEl === entryEl) clearViewer();
     updateSessionCount();
+    updateSelBars();
     if (Object.keys(sessionRuns).length === 0) sessionEmptyEl.style.display = '';
   }
 

@@ -56,7 +56,7 @@ pub(crate) fn export_job(input: &ExportInput, dir: &Path) -> io::Result<PathBuf>
     let ic = if input.width == 0 || input.rows.is_empty() {
         "0".to_string()
     } else {
-        compute_ic(&input.rows[0..input.width])
+        compute_ic_with_fill(&input.rows[0..input.width], input.padding_fill)
     };
 
     let html = render_run_html(input, &ts_human, &ic);
@@ -340,6 +340,20 @@ fn align_label(a: PaddingAlign) -> &'static str {
     }
 }
 
+/// IC for naming purposes, fill-aware: with a fill of 1 the row is mostly
+/// ones, so the raw binary value says nothing about the seed. Bitwise-NOT
+/// the row first so the IC describes the pattern against its background;
+/// with a fill of 0 this is plain [`compute_ic`].
+pub(crate) fn compute_ic_with_fill(row: &[u8], fill: PaddingFill) -> String {
+    match fill {
+        PaddingFill::Zero => compute_ic(row),
+        PaddingFill::One => {
+            let notted: Vec<u8> = row.iter().map(|&b| (b & 1) ^ 1).collect();
+            compute_ic(&notted)
+        }
+    }
+}
+
 /// Converts the initial row to a decimal string.
 /// Finds the first and last `1`, slices that range, interprets as
 /// big-endian binary via pure-Rust string arithmetic, returns "0" if
@@ -465,6 +479,18 @@ mod tests {
     #[test]
     fn compute_ic_padded_seed_strips_leading_trailing_zeros() {
         assert_eq!(compute_ic(&[0, 0, 1, 0, 1, 0, 0]), "5");
+    }
+
+    #[test]
+    fn compute_ic_with_fill_one_nots_the_row() {
+        // Row "1 1 0 1 1" (single 0 seed on a fill-1 background): notted to
+        // "0 0 1 0 0", the IC is 1 — not the raw value 27.
+        assert_eq!(compute_ic_with_fill(&[1, 1, 0, 1, 1], PaddingFill::One), "1");
+        assert_eq!(compute_ic(&[1, 1, 0, 1, 1]), "27");
+        // All-ones row on a fill-1 background nots to all zeros.
+        assert_eq!(compute_ic_with_fill(&[1, 1, 1], PaddingFill::One), "0");
+        // Fill 0 is unchanged.
+        assert_eq!(compute_ic_with_fill(&[0, 1, 1, 0], PaddingFill::Zero), "3");
     }
 
     #[test]
