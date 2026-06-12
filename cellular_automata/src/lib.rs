@@ -410,6 +410,7 @@ fn export_html(
         boundary: result.config.boundary,
         status: status_str,
         rows: &result.rows,
+        cell_size: render.cell_size,
         show_borders: render.show_borders,
         border_width: render.border_width,
         padding_fill,

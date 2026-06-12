@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Cellular Automata</title>
+<link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -83,9 +84,13 @@
     width: 6px; height: 1.5px; background: var(--ink-3);
     transform: rotate(45deg); transform-origin: left top;
   }
-  nav#run-list { flex: 1 1 auto; overflow-y: auto; padding: 4px 0 24px; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
-  nav#run-list::-webkit-scrollbar { width: 8px; }
-  nav#run-list::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 999px; }
+  /* One scroll container for the pinned section and the rule list: the
+     pinned list renders at its full natural height and overflowing items
+     are reached by scrolling the sidebar as a whole. */
+  #sidebar-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+  #sidebar-scroll::-webkit-scrollbar { width: 8px; }
+  #sidebar-scroll::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 999px; }
+  nav#run-list { padding: 4px 0 24px; }
   .rule-group { border-bottom: 1px solid var(--rule); }
   .rule-group > summary {
     list-style: none; cursor: pointer; padding: 11px 16px 10px;
@@ -146,7 +151,8 @@
     width: 26px; height: 26px; border: none; background: none; cursor: pointer;
     color: var(--ink-3); font-size: 15px; display: flex; align-items: center;
     justify-content: center; border-radius: 4px;
-    transition: background 100ms, color 100ms; opacity: 0;
+    /* Dimmed instead of hidden so Save/Pin/Delete stay discoverable. */
+    transition: background 100ms, color 100ms; opacity: 0.45;
   }
   .session-entry:hover .session-menu-btn,
   .session-entry.active .session-menu-btn,
@@ -355,6 +361,25 @@
   #canvas-area { display: none; flex: 1 1 auto; overflow: auto; padding: 20px 24px; }
   body.has-run #canvas-area { display: block; }
   body.has-run #empty       { display: none; }
+  /* While a simulation request is in flight, hide both the empty state and
+     the previous result and show an animated placeholder instead. */
+  #run-loading {
+    display: none; flex: 1 1 auto; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+  }
+  #run-loading .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+  #run-loading-bar {
+    width: 220px; height: 2px; background: var(--rule-soft);
+    border-radius: 999px; overflow: hidden; position: relative;
+  }
+  #run-loading-bar::after {
+    content: ''; position: absolute; top: 0; height: 100%;
+    background: oklch(46% 0.12 145); border-radius: 999px;
+    animation: progress-sweep 1.2s ease-in-out infinite;
+  }
+  body.running #run-loading { display: flex; }
+  body.running #canvas-area { display: none; }
+  body.running #empty       { display: none; }
   #tile-note { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 10px; }
   #tiles { display: flex; flex-direction: column; align-items: flex-start; }
   #tiles canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; background: white; box-shadow: 0 0 0 1px var(--rule); max-width: none; height: auto; }
@@ -400,7 +425,7 @@
     width: 22px; height: 22px; border: none; background: none; cursor: pointer;
     color: var(--ink-3); font-size: 15px; display: flex; align-items: center;
     justify-content: center; border-radius: 4px; padding: 0; line-height: 1;
-    transition: background 100ms, color 100ms; opacity: 0;
+    transition: background 100ms, color 100ms; opacity: 0.45;
   }
   .rule-group > summary:hover .rule-menu-btn,
   .rule-menu-btn:focus { opacity: 1; }
@@ -412,7 +437,7 @@
     width: 22px; height: 22px; border: none; background: none; cursor: pointer;
     color: var(--ink-3); font-size: 15px; display: flex; align-items: center;
     justify-content: center; border-radius: 4px; padding: 0; line-height: 1;
-    transition: background 100ms, color 100ms; opacity: 0;
+    transition: background 100ms, color 100ms; opacity: 0.45;
   }
   .run-entry:hover .run-menu-btn,
   .run-entry.active .run-menu-btn,
@@ -451,39 +476,44 @@
           <span class="count" id="total-count">0</span>
         </div>
         <div class="filter-wrap">
-          <input id="filter" placeholder="Filter…" autocomplete="off" spellcheck="false">
+          <input id="filter" placeholder="Filter or rule #…" autocomplete="off" spellcheck="false">
         </div>
       </div>
-      <details id="pinned-section" style="display:none">
-        <summary>
-          <span class="chev" aria-hidden="true"></span>
-          <span class="pinned-label">Pinned</span>
-          <span class="pinned-count-badge" id="pinned-count">0</span>
-        </summary>
-        <div id="pinned-body"></div>
-      </details>
-      <nav id="run-list"></nav>
+      <div id="sidebar-scroll">
+        <details id="pinned-section" style="display:none">
+          <summary>
+            <span class="chev" aria-hidden="true"></span>
+            <span class="pinned-label">Pinned</span>
+            <span class="pinned-count-badge" id="pinned-count">0</span>
+          </summary>
+          <div id="pinned-body"></div>
+        </details>
+        <nav id="run-list"></nav>
+      </div>
     </div>
 
     <!-- SIM sidebar: form + session list -->
     <div id="sim-sidebar">
-      <div class="sim-form">
+      <!-- novalidate: all validation flows through validateForm() so every
+           error appears in the same styled #form-error slot. -->
+      <form class="sim-form" id="sim-form" novalidate>
         <div class="sim-section-head">Simulation</div>
         <div class="form-field">
           <span class="form-label">Initial Row</span>
-          <input type="text" id="f-seed" value="0000000001" spellcheck="false">
+          <input type="text" id="f-seed" value="0000000001" spellcheck="false"
+                 title="Binary pattern (1s and 0s) placed inside the row">
         </div>
         <div class="form-field">
           <span class="form-label">Rule (0-255)</span>
           <input type="number" id="f-rule" min="0" max="255" value="102">
         </div>
         <div class="form-field">
-          <span class="form-label">Generations</span>
-          <input type="number" id="f-gens" min="0" value="10">
+          <span class="form-label">Generations (max 100,000)</span>
+          <input type="number" id="f-gens" min="0" max="100000" value="10">
         </div>
         <div class="form-field">
-          <span class="form-label">Width</span>
-          <input type="number" id="f-width" min="1" value="10">
+          <span class="form-label">Width (max 10,000)</span>
+          <input type="number" id="f-width" min="1" max="10000" value="10">
         </div>
         <div class="form-field">
           <span class="form-label">Cell Size PX</span>
@@ -518,11 +548,11 @@
           <span class="lbl">Show Cell Borders</span>
         </label>
         <div class="run-row">
-          <button id="run-btn">RUN SIMULATION →</button>
+          <button id="run-btn" type="submit">RUN SIMULATION →</button>
           <button id="reset-btn" type="button">RESET</button>
         </div>
         <span id="form-error"></span>
-      </div>
+      </form>
       <div id="sim-session-section">
         <div class="sb-section-head">
           <span class="sb-section-title">This session</span>
@@ -582,6 +612,7 @@
       <input id="cs-range" type="range" min="1" max="16">
       <input id="cs-num" type="number" min="1" max="64">
       <span class="vbar-label">px</span>
+      <button id="fit-btn" class="btn-sm" type="button" title="Pick the largest cell size that fits the window width">Fit width</button>
     </div>
     <label class="check">
       <input id="b-check" type="checkbox">
@@ -600,6 +631,10 @@
     <div id="canvas-area">
       <div id="tiles"></div>
       <div id="tile-note"></div>
+    </div>
+    <div id="run-loading">
+      <div class="label">Running simulation…</div>
+      <div id="run-loading-bar"></div>
     </div>
   </div>
 </main>
@@ -770,8 +805,11 @@
             ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
   }
   function shortName(e) {
+    // Lead with the fields that distinguish runs inside one rule group (IC,
+    // boundary) so CSS ellipsis only ever swallows the least specific tail.
     const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
-    return e.generations + ' gens · ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic;
+    return 'IC ' + (e.ic || '—') + ' · ' + bnd + ' · ' + e.generations +
+           ' gens · fill ' + (e.fill || '—') + ' ' + (e.align || '');
   }
 
   // ── Sort ──────────────────────────────────────────────────────────────────
@@ -796,7 +834,9 @@
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'run-name';
-    nameSpan.textContent = 'Rule ' + String(e.rule).padStart(3, '0') + ' · ' + shortName(e);
+    // The rule group header already says which rule this is.
+    nameSpan.textContent = shortName(e);
+    row.title = 'Rule ' + String(e.rule).padStart(3, '0') + ' · ' + shortName(e);
 
     const metaSpan = document.createElement('span');
     metaSpan.className = 'run-meta';
@@ -862,6 +902,7 @@
     // is-pinned class only on main list entries, not the pinned section itself
     det.className = 'rule-group' + (isPinned && !isPinnedGroup ? ' is-pinned' : '');
     det.open = !!isPinnedGroup; // open in pinned section, closed in main list
+    det.dataset.rule = rule;
 
     const sum = document.createElement('summary');
     sum.innerHTML =
@@ -979,12 +1020,16 @@
 
   // ── Filter ────────────────────────────────────────────────────────────────
   function applyFilter(term, container) {
+    // A bare number is treated as a rule number: typing "30" (or "030")
+    // surfaces and opens Rule 030 even though entry text never contains it.
+    const numTerm = /^\d{1,3}$/.test(term) ? parseInt(term, 10) : null;
     const groups = container.querySelectorAll('details.rule-group');
     for (const g of groups) {
+      const ruleMatch = numTerm !== null && parseInt(g.dataset.rule, 10) === numTerm;
       const items = g.querySelectorAll('.run-entry');
       let any = false;
       for (const it of items) {
-        const match = !term || it.textContent.toLowerCase().includes(term);
+        const match = !term || ruleMatch || it.textContent.toLowerCase().includes(term);
         it.style.display = match ? '' : 'none';
         if (match) any = true;
       }
@@ -1093,6 +1138,12 @@
   csRange.addEventListener('input',  () => applyCs(csRange.value));
   csNum.addEventListener('change',   () => applyCs(csNum.value));
   bCheck.addEventListener('change',  () => { curBorders = bCheck.checked; renderCanvas(); });
+  document.getElementById('fit-btn').addEventListener('click', () => {
+    if (!curMeta || !curMeta.w) return;
+    // 50 ≈ canvas-area horizontal padding plus the canvas outline.
+    const avail = Math.max(40, document.getElementById('canvas-area').clientWidth - 50);
+    applyCs(Math.min(64, Math.max(1, Math.floor(avail / curMeta.w))));
+  });
 
   function applyLoaded(meta, tiles) {
     curMeta = meta; curTiles = tiles;
@@ -1169,6 +1220,7 @@
     const nameSpan = document.createElement('span');
     nameSpan.className = 'session-name';
     nameSpan.textContent = 'Rule ' + String(data.rule).padStart(3, '0') + ' · ' + shortName(data);
+    entryEl.title = nameSpan.textContent;
 
     const menuWrap = document.createElement('div');
     menuWrap.className = 'session-menu-wrap';
@@ -1371,22 +1423,42 @@
     formErr.style.display = 'none';
   }
 
-  runBtn.addEventListener('click', async () => {
+  // Mirrors the server's limits (MAX_WIDTH, MAX_GENERATIONS, the 500 M cell
+  // cap) so the user gets an actionable message without a round-trip.
+  function validateForm(v) {
+    if (!/^[01]*$/.test(v.seed)) return 'Initial row must contain only 0s and 1s.';
+    if (!Number.isInteger(v.rule) || v.rule < 0 || v.rule > 255) return 'Rule must be a whole number between 0 and 255.';
+    if (!Number.isInteger(v.generations) || v.generations < 0 || v.generations > 100000) return 'Generations must be between 0 and 100,000.';
+    if (!Number.isInteger(v.width) || v.width < 1 || v.width > 10000) return 'Width must be between 1 and 10,000.';
+    if (v.seed.length > v.width) return 'Initial row (' + v.seed.length + ' cells) is longer than the width (' + v.width + ').';
+    if (v.width * (v.generations + 1) > 500000000) return 'Too large: width × (generations + 1) must stay under 500,000,000 cells.';
+    if (!Number.isInteger(v.cell_size) || v.cell_size < 1 || v.cell_size > 64) return 'Cell size must be between 1 and 64 px.';
+    return null;
+  }
+
+  document.getElementById('sim-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
     clearFormError();
+    const body_data = {
+      seed:         document.getElementById('f-seed').value.trim(),
+      rule:         parseInt(document.getElementById('f-rule').value, 10),
+      generations:  parseInt(document.getElementById('f-gens').value, 10),
+      width:        parseInt(document.getElementById('f-width').value, 10),
+      cell_size:    parseInt(document.getElementById('f-cs').value, 10),
+      boundary:     document.getElementById('f-boundary').value,
+      align:        document.getElementById('f-align').value,
+      fill:         document.getElementById('f-fill').value,
+      show_borders: document.getElementById('f-borders').checked,
+    };
+    const problem = validateForm(body_data);
+    if (problem) {
+      showFormError(problem);
+      return;
+    }
     runBtn.disabled = true;
     runBtn.textContent = 'Running…';
+    body.classList.add('running');
     try {
-      const body_data = {
-        seed:         document.getElementById('f-seed').value,
-        rule:         parseInt(document.getElementById('f-rule').value, 10),
-        generations:  parseInt(document.getElementById('f-gens').value, 10),
-        width:        parseInt(document.getElementById('f-width').value, 10),
-        cell_size:    parseInt(document.getElementById('f-cs').value, 10),
-        boundary:     document.getElementById('f-boundary').value,
-        align:        document.getElementById('f-align').value,
-        fill:         document.getElementById('f-fill').value,
-        show_borders: document.getElementById('f-borders').checked,
-      };
       const resp = await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1401,6 +1473,7 @@
     } catch (e) {
       showFormError(String(e));
     } finally {
+      body.classList.remove('running');
       runBtn.disabled = false;
       runBtn.textContent = 'RUN SIMULATION →';
     }

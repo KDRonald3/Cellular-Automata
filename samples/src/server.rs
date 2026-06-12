@@ -198,12 +198,10 @@ fn regenerate_index(dir: &Path) -> io::Result<()> {
     }
     baked.push(']');
 
-    // Write gallery.js next to index.html so the <script src="gallery.js"> tag resolves.
-    // Only write if absent — contents are compile-time constants, so they never change.
-    let gallery_js_path = dir.join("gallery.js");
-    if !gallery_js_path.exists() {
-        fs::write(&gallery_js_path, GALLERY_JS)?;
-    }
+    // Write gallery.js next to index.html so the <script src="gallery.js">
+    // tag resolves when the gallery is opened from disk. Always overwrite so
+    // the on-disk copy tracks the version compiled into this binary.
+    fs::write(dir.join("gallery.js"), GALLERY_JS)?;
 
     let html = format!("{}{}{}", GALLERY_HTML_HEAD, baked, GALLERY_HTML_TAIL);
     fs::write(dir.join(INDEX_FILE), html)?;
@@ -585,7 +583,13 @@ fn compute_tile_data(
 ) -> (CanvasMeta, Vec<TilePayload>) {
     let width = result.width;
     let height = result.rows.len().checked_div(width).unwrap_or(0);
-    let cs = (1600usize.checked_div(width).unwrap_or(1)).clamp(1, 16);
+    // Honor the caller's requested cell size as the initial zoom; 0 means
+    // "auto" (fit ~1600 px). The viewer can always re-zoom client-side.
+    let cs = if render.cell_size == 0 {
+        (1600usize.checked_div(width).unwrap_or(1)).clamp(1, 16)
+    } else {
+        (render.cell_size as usize).clamp(1, 64)
+    };
 
     let tile_max_rows_by_cells = MAX_EXPORT_CELLS.checked_div(width).unwrap_or(1).max(1);
     let tile_max_rows = tile_max_rows_by_cells
@@ -631,6 +635,25 @@ fn unprocessable(msg: impl std::fmt::Display) -> Response {
     (StatusCode::UNPROCESSABLE_ENTITY, msg.to_string()).into_response()
 }
 
+/// Turn serde's deserialization message into something a person filling in
+/// the form can act on. Falls back to the (prefix-stripped) original text
+/// for shapes we don't recognise.
+fn friendly_json_error(raw: &str) -> String {
+    let msg = raw
+        .strip_prefix("Failed to deserialize the JSON body into the target type: ")
+        .unwrap_or(raw);
+    let msg = match msg.rfind(" at line ") {
+        Some(pos) => &msg[..pos],
+        None => msg,
+    };
+    let msg = msg
+        .replace("expected u8", "expected a whole number between 0 and 255")
+        .replace("expected usize", "expected a non-negative whole number")
+        .replace("expected u32", "expected a non-negative whole number")
+        .replace("invalid type: null,", "the field is empty;");
+    format!("Invalid input — {msg}")
+}
+
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 async fn get_index() -> impl IntoResponse {
@@ -641,8 +664,8 @@ async fn get_index() -> impl IntoResponse {
     )
 }
 
-async fn get_manifest(State(state): State<AppState>) -> Response {
-    let path = state.runs_dir.join("manifest.tsv");
+async fn manifest_response(runs_dir: &Path) -> Response {
+    let path = runs_dir.join(MANIFEST_FILE);
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => (
             [
@@ -655,10 +678,29 @@ async fn get_manifest(State(state): State<AppState>) -> Response {
     }
 }
 
+async fn get_manifest(State(state): State<AppState>) -> Response {
+    manifest_response(&state.runs_dir).await
+}
+
 async fn get_run_file(
     State(state): State<AppState>,
     AxumPath(filename): AxumPath<String>,
 ) -> Response {
+    // The gallery index.html references these two by relative URL, so they
+    // must resolve under /runs/ too. gallery.js is served from the embedded
+    // constant so it can never go stale relative to this binary.
+    if filename == "gallery.js" {
+        return (
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("text/javascript; charset=utf-8")),
+                (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+            ],
+            GALLERY_JS,
+        ).into_response();
+    }
+    if filename == MANIFEST_FILE {
+        return manifest_response(&state.runs_dir).await;
+    }
     if !is_safe_filename(&filename) || !filename.ends_with(".html") {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -677,8 +719,12 @@ async fn get_run_file(
 
 async fn post_run(
     State(state): State<AppState>,
-    Json(req): Json<RunRequest>,
+    payload: Result<Json<RunRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
+    let Json(req) = match payload {
+        Ok(j) => j,
+        Err(rej) => return unprocessable(friendly_json_error(&rej.body_text())),
+    };
     let boundary = match parse_boundary(&req.boundary) {
         Some(b) => b,
         None => return unprocessable(format!("unknown boundary {:?}", req.boundary)),
@@ -936,6 +982,24 @@ mod tests {
         // Similar-looking but legal names stay allowed.
         assert!(is_safe_filename("CONFIG.html"));
         assert!(is_safe_filename("COM10.html"));
+    }
+
+    #[test]
+    fn friendly_json_error_strips_serde_noise() {
+        let raw = "Failed to deserialize the JSON body into the target type: \
+                   rule: invalid value: integer `300`, expected u8 at line 1 column 22";
+        assert_eq!(
+            friendly_json_error(raw),
+            "Invalid input — rule: invalid value: integer `300`, \
+             expected a whole number between 0 and 255"
+        );
+        let raw2 = "Failed to deserialize the JSON body into the target type: \
+                    generations: invalid type: null, expected usize at line 1 column 40";
+        assert_eq!(
+            friendly_json_error(raw2),
+            "Invalid input — generations: the field is empty; \
+             expected a non-negative whole number"
+        );
     }
 
     #[test]

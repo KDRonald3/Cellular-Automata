@@ -23,6 +23,9 @@ pub(crate) struct ExportInput<'a> {
     pub status: &'a str,
     /// Flat row-major grid: cell (y, x) lives at `rows[y * width + x]`.
     pub rows: &'a [u8],
+    /// Initial zoom of the exported page in pixels per cell. `0` means
+    /// "auto": fit roughly 1600 px of width, clamped to `[1, 16]`.
+    pub cell_size: u32,
     pub show_borders: bool,
     /// Initial inter-cell border width baked into the exported page.
     pub border_width: f32,
@@ -74,7 +77,11 @@ fn render_run_html(input: &ExportInput, exported_at: &str, ic: &str) -> String {
     };
     let fill_str = fill_label(input.padding_fill);
     let align_str = align_label(input.padding_align);
-    let cs = (1600usize / width.max(1)).clamp(1, 16);
+    let cs = if input.cell_size == 0 {
+        (1600usize / width.max(1)).clamp(1, 16)
+    } else {
+        (input.cell_size as usize).clamp(1, 64)
+    };
 
     let tile_max_rows_by_cells = MAX_EXPORT_CELLS.checked_div(width).unwrap_or(1).max(1);
     let tile_max_rows = tile_max_rows_by_cells

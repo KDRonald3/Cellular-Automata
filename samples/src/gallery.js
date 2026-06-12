@@ -81,8 +81,11 @@
     return (e.generations + ' generations of rule ' + e.rule + ' ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
   }
   function shortName(e) {
+    // Lead with the fields that distinguish runs inside one rule group (IC,
+    // boundary) so CSS ellipsis only ever swallows the least specific tail.
     const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
-    return 'rule ' + e.rule + ' ' + e.generations + ' gens · ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic;
+    return 'IC ' + (e.ic || '—') + ' · ' + bnd + ' · ' + e.generations +
+           ' gens · fill ' + (e.fill || '—') + ' ' + (e.align || '');
   }
 
   // ----- Sort -----
@@ -118,6 +121,7 @@
       const det = document.createElement('details');
       det.className = 'rule-group';
       det.open = true;
+      det.dataset.rule = rule;
 
       const sum = document.createElement('summary');
       sum.innerHTML =
@@ -133,6 +137,7 @@
         const row = document.createElement('div');
         row.className = 'run-entry';
         row.setAttribute('data-filename', e.filename);
+        row.title = 'Rule ' + String(rule).padStart(3, '0') + ' · ' + shortName(e);
         row.innerHTML =
           '<span class="run-name">' + esc(shortName(e)) + '</span>' +
           '<span class="run-meta">#' + esc(e.id) + '</span>';
@@ -148,12 +153,16 @@
   // ----- Filter -----
   filterEl.addEventListener('input', () => {
     const term = filterEl.value.toLowerCase().trim();
+    // A bare number is treated as a rule number: typing "30" (or "030")
+    // surfaces Rule 030 even though entry text never contains it.
+    const numTerm = /^\d{1,3}$/.test(term) ? parseInt(term, 10) : null;
     const groups = listEl.querySelectorAll('details.rule-group');
     for (const g of groups) {
+      const ruleMatch = numTerm !== null && parseInt(g.dataset.rule, 10) === numTerm;
       const items = g.querySelectorAll('.run-entry');
       let any = false;
       for (const it of items) {
-        const match = !term || it.textContent.toLowerCase().includes(term);
+        const match = !term || ruleMatch || it.textContent.toLowerCase().includes(term);
         it.style.display = match ? '' : 'none';
         if (match) any = true;
       }
