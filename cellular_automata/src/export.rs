@@ -23,6 +23,9 @@ pub(crate) struct ExportInput<'a> {
     pub status: &'a str,
     /// Flat row-major grid: cell (y, x) lives at `rows[y * width + x]`.
     pub rows: &'a [u8],
+    /// Initial zoom of the exported page in pixels per cell. `0` means
+    /// "auto": fit roughly 1600 px of width, clamped to `[1, 16]`.
+    pub cell_size: u32,
     pub show_borders: bool,
     /// Initial inter-cell border width baked into the exported page.
     pub border_width: f32,
@@ -53,7 +56,7 @@ pub(crate) fn export_job(input: &ExportInput, dir: &Path) -> io::Result<PathBuf>
     let ic = if input.width == 0 || input.rows.is_empty() {
         "0".to_string()
     } else {
-        compute_ic(&input.rows[0..input.width])
+        compute_ic_with_fill(&input.rows[0..input.width], input.padding_fill)
     };
 
     let html = render_run_html(input, &ts_human, &ic);
@@ -65,7 +68,7 @@ pub(crate) fn export_job(input: &ExportInput, dir: &Path) -> io::Result<PathBuf>
 fn render_run_html(input: &ExportInput, exported_at: &str, ic: &str) -> String {
     let rows = input.rows;
     let width = input.width;
-    let height = if width == 0 { 0 } else { rows.len() / width };
+    let height = rows.len().checked_div(width).unwrap_or(0);
     // Clamp border_width to a finite value before embedding in JSON.
     let safe_bw: f32 = if input.border_width.is_finite() {
         input.border_width.max(0.0)
@@ -74,21 +77,17 @@ fn render_run_html(input: &ExportInput, exported_at: &str, ic: &str) -> String {
     };
     let fill_str = fill_label(input.padding_fill);
     let align_str = align_label(input.padding_align);
-    let cs = (1600usize / width.max(1)).clamp(1, 16);
-
-    let tile_max_rows_by_cells = if width == 0 {
-        1
+    let cs = if input.cell_size == 0 {
+        (1600usize / width.max(1)).clamp(1, 16)
     } else {
-        (MAX_EXPORT_CELLS / width).max(1)
+        (input.cell_size as usize).clamp(1, 64)
     };
+
+    let tile_max_rows_by_cells = MAX_EXPORT_CELLS.checked_div(width).unwrap_or(1).max(1);
     let tile_max_rows = tile_max_rows_by_cells
         .min(MAX_EXPORT_HEIGHT / cs.max(1))
         .max(1);
-    let num_tiles = if height == 0 {
-        0
-    } else {
-        (height + tile_max_rows - 1) / tile_max_rows
-    };
+    let num_tiles = height.div_ceil(tile_max_rows);
 
     let mut tile_meta_entries: Vec<String> = Vec::with_capacity(num_tiles);
     let mut tile_scripts = String::new();
@@ -341,6 +340,20 @@ fn align_label(a: PaddingAlign) -> &'static str {
     }
 }
 
+/// IC for naming purposes, fill-aware: with a fill of 1 the row is mostly
+/// ones, so the raw binary value says nothing about the seed. Bitwise-NOT
+/// the row first so the IC describes the pattern against its background;
+/// with a fill of 0 this is plain [`compute_ic`].
+pub(crate) fn compute_ic_with_fill(row: &[u8], fill: PaddingFill) -> String {
+    match fill {
+        PaddingFill::Zero => compute_ic(row),
+        PaddingFill::One => {
+            let notted: Vec<u8> = row.iter().map(|&b| (b & 1) ^ 1).collect();
+            compute_ic(&notted)
+        }
+    }
+}
+
 /// Converts the initial row to a decimal string.
 /// Finds the first and last `1`, slices that range, interprets as
 /// big-endian binary via pure-Rust string arithmetic, returns "0" if
@@ -466,6 +479,18 @@ mod tests {
     #[test]
     fn compute_ic_padded_seed_strips_leading_trailing_zeros() {
         assert_eq!(compute_ic(&[0, 0, 1, 0, 1, 0, 0]), "5");
+    }
+
+    #[test]
+    fn compute_ic_with_fill_one_nots_the_row() {
+        // Row "1 1 0 1 1" (single 0 seed on a fill-1 background): notted to
+        // "0 0 1 0 0", the IC is 1 — not the raw value 27.
+        assert_eq!(compute_ic_with_fill(&[1, 1, 0, 1, 1], PaddingFill::One), "1");
+        assert_eq!(compute_ic(&[1, 1, 0, 1, 1]), "27");
+        // All-ones row on a fill-1 background nots to all zeros.
+        assert_eq!(compute_ic_with_fill(&[1, 1, 1], PaddingFill::One), "0");
+        // Fill 0 is unchanged.
+        assert_eq!(compute_ic_with_fill(&[0, 1, 1, 0], PaddingFill::Zero), "3");
     }
 
     #[test]

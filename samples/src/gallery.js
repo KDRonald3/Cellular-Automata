@@ -40,6 +40,25 @@
   let curTiles = [];
   let activeEl = null;
 
+  // Multi-select needs the delete API, which only exists when the gallery is
+  // served by the app (not opened from disk). Old exported index.html pages
+  // may also lack the #sel-bar markup.
+  const canSelect = location.protocol !== 'file:' && !!document.getElementById('sel-bar');
+  const selected = new Set(); // filenames
+
+  function updateSelBar() {
+    if (!canSelect) return;
+    document.getElementById('sel-count').textContent = selected.size + ' selected';
+    document.getElementById('sel-bar').classList.toggle('open', selected.size > 0);
+  }
+  function syncSelChecks() {
+    for (const el of listEl.querySelectorAll('.run-entry')) {
+      const box = el.querySelector('.sel-box');
+      if (box) box.checked = selected.has(el.getAttribute('data-filename'));
+    }
+    updateSelBar();
+  }
+
   const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
   // ----- Sidebar toggle -----
@@ -78,11 +97,14 @@
   function displayName(e) {
     if (!e.fill && !e.align && !e.ic) return e.filename;
     const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
-    return (e.generations + ' generations of rule ' + e.rule + ' ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
+    return ('Rule ' + e.rule + ' · ' + e.generations + ' generations ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
   }
   function shortName(e) {
+    // Lead with the fields that distinguish runs inside one rule group (IC,
+    // boundary) so CSS ellipsis only ever swallows the least specific tail.
     const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
-    return 'rule ' + e.rule + ' ' + e.generations + ' gens · ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic;
+    return 'IC ' + (e.ic || '—') + ' · ' + bnd + ' · ' + e.generations +
+           ' gens · fill ' + (e.fill || '—') + ' ' + (e.align || '');
   }
 
   // ----- Sort -----
@@ -118,6 +140,7 @@
       const det = document.createElement('details');
       det.className = 'rule-group';
       det.open = true;
+      det.dataset.rule = rule;
 
       const sum = document.createElement('summary');
       sum.innerHTML =
@@ -131,11 +154,25 @@
       grpBody.className = 'group-body';
       for (const e of ruleEntries) {
         const row = document.createElement('div');
-        row.className = 'run-entry';
+        row.className = 'run-entry' + (canSelect ? ' selectable' : '');
         row.setAttribute('data-filename', e.filename);
+        row.title = 'Rule ' + String(rule).padStart(3, '0') + ' · ' + shortName(e);
         row.innerHTML =
-          '<span class="run-name">' + esc(shortName(e)) + '</span>' +
+          '<span class="run-name">' + esc(row.title) + '</span>' +
           '<span class="run-meta">#' + esc(e.id) + '</span>';
+        if (canSelect) {
+          const box = document.createElement('input');
+          box.type = 'checkbox';
+          box.className = 'sel-box';
+          box.title = 'Select run';
+          box.checked = selected.has(e.filename);
+          box.addEventListener('click', (ev) => ev.stopPropagation());
+          box.addEventListener('change', () => {
+            if (box.checked) selected.add(e.filename); else selected.delete(e.filename);
+            updateSelBar();
+          });
+          row.prepend(box);
+        }
         row.addEventListener('click', () => loadRun(e, row));
         grpBody.appendChild(row);
       }
@@ -143,17 +180,45 @@
       listEl.appendChild(det);
     }
     countEl.textContent = total;
+
+    // Drop selections that no longer exist after a rebuild.
+    const live = new Set(entries.map(e => e.filename));
+    for (const f of [...selected]) if (!live.has(f)) selected.delete(f);
+    updateSelBar();
+  }
+
+  // ----- Bulk delete -----
+  if (canSelect) {
+    document.getElementById('sel-clear').addEventListener('click', () => {
+      selected.clear();
+      syncSelChecks();
+    });
+    document.getElementById('sel-delete').addEventListener('click', async () => {
+      const files = [...selected];
+      if (!files.length) return;
+      const noun = files.length === 1 ? 'run' : 'runs';
+      if (!confirm('Delete ' + files.length + ' saved ' + noun + '? Their files will be removed.')) return;
+      await Promise.all(files.map(f =>
+        fetch('/api/saved/' + encodeURIComponent(f), { method: 'DELETE' }).catch(() => {})
+      ));
+      selected.clear();
+      init(); // refetch the manifest and rebuild the sidebar
+    });
   }
 
   // ----- Filter -----
   filterEl.addEventListener('input', () => {
     const term = filterEl.value.toLowerCase().trim();
+    // A bare number is treated as a rule number: typing "30" (or "030")
+    // surfaces Rule 030 even though entry text never contains it.
+    const numTerm = /^\d{1,3}$/.test(term) ? parseInt(term, 10) : null;
     const groups = listEl.querySelectorAll('details.rule-group');
     for (const g of groups) {
+      const ruleMatch = numTerm !== null && parseInt(g.dataset.rule, 10) === numTerm;
       const items = g.querySelectorAll('.run-entry');
       let any = false;
       for (const it of items) {
-        const match = !term || it.textContent.toLowerCase().includes(term);
+        const match = !term || ruleMatch || it.textContent.toLowerCase().includes(term);
         it.style.display = match ? '' : 'none';
         if (match) any = true;
       }

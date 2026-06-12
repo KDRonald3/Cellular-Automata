@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Cellular Automata — Runs</title>
+<link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -112,7 +113,25 @@
   .run-meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.02em; }
   .run-entry.active .run-name { color: var(--accent); }
   .run-entry.active .run-meta { color: oklch(45% 0.10 35); }
-  main#main { min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--bg); }
+  /* Multi-select (active only when the gallery is served, not file://) */
+  .run-entry.selectable { grid-template-columns: auto 1fr auto; }
+  .sel-box { width: 13px; height: 13px; accent-color: var(--ink); cursor: pointer; opacity: 0.45; margin: 0; }
+  .run-entry:hover .sel-box, .sel-box:checked { opacity: 1; }
+  .sel-bar { display: none; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .sel-bar.open { display: flex; }
+  .sel-count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-right: auto; }
+  .btn-sm {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+    padding: 2px 6px; border: 1px solid var(--rule); border-radius: 4px;
+    background: var(--bg-card); color: var(--ink-2); cursor: pointer; white-space: nowrap;
+  }
+  .btn-sm:hover { background: var(--bg-sunk); border-color: var(--ink-3); }
+  .btn-sm.danger { color: oklch(42% 0.14 22); border-color: oklch(80% 0.06 22); }
+  .btn-sm.danger:hover { background: oklch(96% 0.025 22); }
+  /* Pin main to column 3 explicitly: the resizer is display:none while the
+     sidebar is closed, and hidden elements don't occupy grid cells, so
+     auto-placement would slide main into the 0px second column. */
+  main#main { grid-column: 3; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--bg); }
   header.topbar {
     flex: 0 0 auto; height: 52px; border-bottom: 1px solid var(--rule);
     background: var(--bg); display: flex; align-items: center; gap: 14px; padding: 0 20px 0 14px;
@@ -185,7 +204,7 @@
   .err-box a { color: oklch(40% 0.12 35); }
 </style>
 </head>
-<body class="">
+<body class="sidebar-open">
 
 <aside id="sidebar">
   <div class="sidebar-inner">
@@ -195,7 +214,12 @@
         <span class="count" id="total-count">0</span>
       </div>
       <div class="filter-wrap">
-        <input id="filter" placeholder="Filter…" autocomplete="off" spellcheck="false">
+        <input id="filter" placeholder="Filter or rule #…" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="sel-bar" class="sel-bar">
+        <span class="sel-count" id="sel-count">0 selected</span>
+        <button class="btn-sm danger" id="sel-delete" type="button">Delete</button>
+        <button class="btn-sm" id="sel-clear" type="button">Clear</button>
       </div>
     </div>
     <nav id="run-list"></nav>

@@ -7,12 +7,14 @@ use std::sync::{Arc, Mutex};
 
 use axum::{
     Router,
-    extract::{DefaultBodyLimit, Path as AxumPath, State},
-    http::{HeaderValue, StatusCode, header},
+    extract::{DefaultBodyLimit, Path as AxumPath, Request, State},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json,
 };
+use tokio::sync::Semaphore;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use cellular_automata::{
@@ -30,6 +32,14 @@ const MAX_SESSIONS: usize = 1_000;
 const MAX_WIDTH: usize = 10_000;
 const MAX_GENERATIONS: usize = 100_000;
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// Upper bound on cells retained across *all* in-memory session runs. A
+/// single run can be up to 500 M cells, so MAX_SESSIONS alone would allow
+/// hundreds of GB of retained grids; this caps the total instead.
+const MAX_TOTAL_SESSION_CELLS: usize = 2_000_000_000;
+/// Simulations are CPU-bound; without a cap each request gets its own
+/// blocking thread (tokio allows hundreds), so a burst of large requests
+/// can exhaust CPU and memory before the session cap is even checked.
+const MAX_CONCURRENT_SIMULATIONS: usize = 4;
 
 const MANIFEST_FILE: &str = "manifest.tsv";
 const INDEX_FILE: &str = "index.html";
@@ -188,12 +198,10 @@ fn regenerate_index(dir: &Path) -> io::Result<()> {
     }
     baked.push(']');
 
-    // Write gallery.js next to index.html so the <script src="gallery.js"> tag resolves.
-    // Only write if absent — contents are compile-time constants, so they never change.
-    let gallery_js_path = dir.join("gallery.js");
-    if !gallery_js_path.exists() {
-        fs::write(&gallery_js_path, GALLERY_JS)?;
-    }
+    // Write gallery.js next to index.html so the <script src="gallery.js">
+    // tag resolves when the gallery is opened from disk. Always overwrite so
+    // the on-disk copy tracks the version compiled into this binary.
+    fs::write(dir.join("gallery.js"), GALLERY_JS)?;
 
     let html = format!("{}{}{}", GALLERY_HTML_HEAD, baked, GALLERY_HTML_TAIL);
     fs::write(dir.join(INDEX_FILE), html)?;
@@ -212,7 +220,7 @@ fn save_result_if_unique(
     let ic = if result.width == 0 || result.rows.is_empty() {
         "0".to_string()
     } else {
-        compute_ic(&result.rows[0..result.width])
+        compute_ic_with_fill(&result.rows[0..result.width], fill)
     };
     let rule_str     = result.config.rule.to_string();
     let width_str    = result.width.to_string();
@@ -242,7 +250,7 @@ fn save_result_if_unique(
     }
 
     let path = save_result(result, opts, dir, fill, align)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     let filename = path
         .file_name()
@@ -262,7 +270,7 @@ fn save_result_if_unique(
         status:     "Done".to_string(),
         progress:   result.generations.to_string(),
         timestamp:  ts_human,
-        filename:   filename,
+        filename,
         fill:       fill_str.to_string(),
         align:      align_str.to_string(),
         ic,
@@ -278,10 +286,10 @@ fn delete_saved_run(dir: &Path, filename: &str) -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "unsafe filename"));
     }
     let _guard = MANIFEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    if let Err(e) = fs::remove_file(dir.join(filename)) {
-        if e.kind() != io::ErrorKind::NotFound {
-            return Err(e);
-        }
+    if let Err(e) = fs::remove_file(dir.join(filename))
+        && e.kind() != io::ErrorKind::NotFound
+    {
+        return Err(e);
     }
     let manifest_path = dir.join(MANIFEST_FILE);
     if manifest_path.exists() {
@@ -305,11 +313,55 @@ fn delete_saved_run(dir: &Path, filename: &str) -> io::Result<()> {
 // ── Tile packing ──────────────────────────────────────────────────────────────
 
 fn is_safe_filename(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 200
-        && name
+    if name.is_empty()
+        || name.len() > 200
+        || !name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
+        // Reject names with no alphanumeric at all — this excludes "." and
+        // ".." (which `Path::join` would resolve to the runs dir or its
+        // parent) without restricting any real exported filename.
+        || !name.bytes().any(|b| b.is_ascii_alphanumeric())
+    {
+        return false;
+    }
+    // Windows maps reserved device names (optionally with an extension,
+    // e.g. "CON.html") to devices; reading one can block the request task.
+    let stem = name.split('.').next().unwrap_or(name);
+    const RESERVED: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    !RESERVED.iter().any(|r| stem.eq_ignore_ascii_case(r))
+}
+
+/// True if a `Host` header names this machine. Requests from a hostile
+/// website via DNS rebinding carry the attacker's hostname here, so anything
+/// other than a loopback name is rejected before reaching a handler.
+fn host_is_local(host: &str) -> bool {
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        // IPv6 literal: "[::1]:3000" → "::1"
+        match rest.split_once(']') {
+            Some((ip, _)) => ip,
+            None => return false,
+        }
+    } else {
+        host.rsplit_once(':').map_or(host, |(n, _)| n)
+    };
+    name.eq_ignore_ascii_case("localhost") || name == "127.0.0.1" || name == "::1"
+}
+
+async fn require_local_host(req: Request, next: Next) -> Response {
+    let host_ok = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .is_some_and(host_is_local);
+    if !host_ok {
+        return (StatusCode::FORBIDDEN, "invalid Host header").into_response();
+    }
+    next.run(req).await
 }
 
 fn pack_bits_range(rows: &[u8], width: usize, start_row: usize, end_row: usize) -> Vec<u8> {
@@ -357,6 +409,20 @@ fn pack_bits_range(rows: &[u8], width: usize, start_row: usize, end_row: usize) 
         }
     }
     out
+}
+
+/// IC for naming purposes, fill-aware: with a fill of 1 the row is mostly
+/// ones, so the raw binary value says nothing about the seed. Bitwise-NOT
+/// the row first so the IC describes the pattern against its background;
+/// with a fill of 0 this is plain `compute_ic`.
+fn compute_ic_with_fill(row: &[u8], fill: PaddingFill) -> String {
+    match fill {
+        PaddingFill::Zero => compute_ic(row),
+        PaddingFill::One => {
+            let notted: Vec<u8> = row.iter().map(|&b| (b & 1) ^ 1).collect();
+            compute_ic(&notted)
+        }
+    }
 }
 
 fn compute_ic(row: &[u8]) -> String {
@@ -409,6 +475,8 @@ struct SessionRun {
 struct AppState {
     session: Arc<Mutex<HashMap<u64, SessionRun>>>,
     runs_dir: PathBuf,
+    /// Limits concurrent CPU-bound simulations; excess requests queue.
+    sim_permits: Arc<Semaphore>,
 }
 
 // ── Serde types ───────────────────────────────────────────────────────────────
@@ -528,19 +596,25 @@ fn compute_tile_data(
     padding_align: PaddingAlign,
 ) -> (CanvasMeta, Vec<TilePayload>) {
     let width = result.width;
-    let height = if width == 0 { 0 } else { result.rows.len() / width };
-    let cs = if width == 0 { 1 } else { (1600usize / width.max(1)).clamp(1, 16) };
+    let height = result.rows.len().checked_div(width).unwrap_or(0);
+    // Honor the caller's requested cell size as the initial zoom; 0 means
+    // "auto" (fit ~1600 px). The viewer can always re-zoom client-side.
+    let cs = if render.cell_size == 0 {
+        (1600usize.checked_div(width).unwrap_or(1)).clamp(1, 16)
+    } else {
+        (render.cell_size as usize).clamp(1, 64)
+    };
 
-    let tile_max_rows_by_cells = if width == 0 { 1 } else { (MAX_EXPORT_CELLS / width).max(1) };
+    let tile_max_rows_by_cells = MAX_EXPORT_CELLS.checked_div(width).unwrap_or(1).max(1);
     let tile_max_rows = tile_max_rows_by_cells
         .min(MAX_EXPORT_HEIGHT / cs.max(1))
         .max(1);
-    let num_tiles = if height == 0 { 0 } else { (height + tile_max_rows - 1) / tile_max_rows };
+    let num_tiles = height.div_ceil(tile_max_rows);
 
     let ic = if width == 0 || result.rows.is_empty() {
         "0".to_string()
     } else {
-        compute_ic(&result.rows[0..width])
+        compute_ic_with_fill(&result.rows[0..width], padding_fill)
     };
 
     let mut tile_metas = Vec::with_capacity(num_tiles);
@@ -575,6 +649,25 @@ fn unprocessable(msg: impl std::fmt::Display) -> Response {
     (StatusCode::UNPROCESSABLE_ENTITY, msg.to_string()).into_response()
 }
 
+/// Turn serde's deserialization message into something a person filling in
+/// the form can act on. Falls back to the (prefix-stripped) original text
+/// for shapes we don't recognise.
+fn friendly_json_error(raw: &str) -> String {
+    let msg = raw
+        .strip_prefix("Failed to deserialize the JSON body into the target type: ")
+        .unwrap_or(raw);
+    let msg = match msg.rfind(" at line ") {
+        Some(pos) => &msg[..pos],
+        None => msg,
+    };
+    let msg = msg
+        .replace("expected u8", "expected a whole number between 0 and 255")
+        .replace("expected usize", "expected a non-negative whole number")
+        .replace("expected u32", "expected a non-negative whole number")
+        .replace("invalid type: null,", "the field is empty;");
+    format!("Invalid input — {msg}")
+}
+
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 async fn get_index() -> impl IntoResponse {
@@ -585,28 +678,53 @@ async fn get_index() -> impl IntoResponse {
     )
 }
 
-async fn get_manifest(State(state): State<AppState>) -> Response {
-    let path = state.runs_dir.join("manifest.tsv");
+async fn manifest_response(runs_dir: &Path) -> Response {
+    let path = runs_dir.join(MANIFEST_FILE);
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => (
-            [(header::CONTENT_TYPE, HeaderValue::from_static("text/tab-separated-values; charset=utf-8"))],
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("text/tab-separated-values; charset=utf-8")),
+                (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+            ],
             content,
         ).into_response(),
         Err(_) => (StatusCode::OK, "").into_response(),
     }
 }
 
+async fn get_manifest(State(state): State<AppState>) -> Response {
+    manifest_response(&state.runs_dir).await
+}
+
 async fn get_run_file(
     State(state): State<AppState>,
     AxumPath(filename): AxumPath<String>,
 ) -> Response {
+    // The gallery index.html references these two by relative URL, so they
+    // must resolve under /runs/ too. gallery.js is served from the embedded
+    // constant so it can never go stale relative to this binary.
+    if filename == "gallery.js" {
+        return (
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("text/javascript; charset=utf-8")),
+                (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+            ],
+            GALLERY_JS,
+        ).into_response();
+    }
+    if filename == MANIFEST_FILE {
+        return manifest_response(&state.runs_dir).await;
+    }
     if !is_safe_filename(&filename) || !filename.ends_with(".html") {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let path = state.runs_dir.join(&filename);
     match tokio::fs::read(&path).await {
         Ok(bytes) => (
-            [(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"))],
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8")),
+                (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+            ],
             bytes,
         ).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
@@ -615,8 +733,12 @@ async fn get_run_file(
 
 async fn post_run(
     State(state): State<AppState>,
-    Json(req): Json<RunRequest>,
+    payload: Result<Json<RunRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
+    let Json(req) = match payload {
+        Ok(j) => j,
+        Err(rej) => return unprocessable(friendly_json_error(&rej.body_text())),
+    };
     let boundary = match parse_boundary(&req.boundary) {
         Some(b) => b,
         None => return unprocessable(format!("unknown boundary {:?}", req.boundary)),
@@ -658,6 +780,13 @@ async fn post_run(
         border_width: req.border_width.unwrap_or(1.0),
     };
 
+    // Holding the permit across the blocking task bounds both CPU use and
+    // the transient memory of simulations that are not yet session-tracked.
+    let _permit = match state.sim_permits.clone().acquire_owned().await {
+        Ok(p) => p,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
     let result = match tokio::task::spawn_blocking(move || {
         run(config, initial, render, OutputKind::Structured)
     })
@@ -686,6 +815,14 @@ async fn post_run(
         if lock.len() >= MAX_SESSIONS {
             return (StatusCode::TOO_MANY_REQUESTS, "session limit reached").into_response();
         }
+        let retained_cells: usize = lock.values().map(|s| s.result.rows.len()).sum();
+        if retained_cells.saturating_add(result.rows.len()) > MAX_TOTAL_SESSION_CELLS {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "session memory limit reached; remove some session runs and retry",
+            )
+                .into_response();
+        }
         lock.insert(id, SessionRun {
             result: Arc::new(result),
             render,
@@ -713,7 +850,15 @@ async fn post_run(
 async fn post_save_run(
     State(state): State<AppState>,
     AxumPath(id_str): AxumPath<String>,
+    headers: HeaderMap,
 ) -> Response {
+    // A body-less POST is a CORS "simple request" that browsers send
+    // cross-origin without preflight. Requiring a custom header forces a
+    // preflight (which fails — no CORS layer), so only same-origin callers
+    // and non-browser clients like curl can save.
+    if !headers.contains_key("x-requested-with") {
+        return (StatusCode::FORBIDDEN, "missing X-Requested-With header").into_response();
+    }
     let id: u64 = match id_str.parse() {
         Ok(n) => n,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -804,6 +949,7 @@ pub fn build_router(runs_dir: PathBuf) -> Router {
     let state = AppState {
         session: Arc::new(Mutex::new(HashMap::new())),
         runs_dir,
+        sim_permits: Arc::new(Semaphore::new(MAX_CONCURRENT_SIMULATIONS)),
     };
     Router::new()
         .route("/", get(get_index))
@@ -814,5 +960,79 @@ pub fn build_router(runs_dir: PathBuf) -> Router {
         .route("/api/runs/:id", delete(delete_session_run))
         .route("/api/saved/:filename", delete(delete_saved_file))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
+        .layer(middleware::from_fn(require_local_host))
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_filename_accepts_exported_names() {
+        assert!(is_safe_filename("rule030_w401_g100_padded_20260611_120000_job1.html"));
+        assert!(is_safe_filename("a-b_c.1.html"));
+    }
+
+    #[test]
+    fn safe_filename_rejects_traversal_and_separators() {
+        assert!(!is_safe_filename(""));
+        assert!(!is_safe_filename("."));
+        assert!(!is_safe_filename(".."));
+        assert!(!is_safe_filename("..."));
+        assert!(!is_safe_filename("a/b.html"));
+        assert!(!is_safe_filename("a\\b.html"));
+        assert!(!is_safe_filename("..\\x.html"));
+        assert!(!is_safe_filename(&"a".repeat(201)));
+    }
+
+    #[test]
+    fn safe_filename_rejects_windows_device_names() {
+        assert!(!is_safe_filename("CON"));
+        assert!(!is_safe_filename("con.html"));
+        assert!(!is_safe_filename("Nul.html"));
+        assert!(!is_safe_filename("COM1.html"));
+        assert!(!is_safe_filename("lpt9"));
+        // Similar-looking but legal names stay allowed.
+        assert!(is_safe_filename("CONFIG.html"));
+        assert!(is_safe_filename("COM10.html"));
+    }
+
+    #[test]
+    fn compute_ic_with_fill_one_nots_the_row() {
+        assert_eq!(compute_ic_with_fill(&[1, 1, 0, 1, 1], PaddingFill::One), "1");
+        assert_eq!(compute_ic_with_fill(&[1, 1, 1], PaddingFill::One), "0");
+        assert_eq!(compute_ic_with_fill(&[0, 1, 1, 0], PaddingFill::Zero), "3");
+    }
+
+    #[test]
+    fn friendly_json_error_strips_serde_noise() {
+        let raw = "Failed to deserialize the JSON body into the target type: \
+                   rule: invalid value: integer `300`, expected u8 at line 1 column 22";
+        assert_eq!(
+            friendly_json_error(raw),
+            "Invalid input — rule: invalid value: integer `300`, \
+             expected a whole number between 0 and 255"
+        );
+        let raw2 = "Failed to deserialize the JSON body into the target type: \
+                    generations: invalid type: null, expected usize at line 1 column 40";
+        assert_eq!(
+            friendly_json_error(raw2),
+            "Invalid input — generations: the field is empty; \
+             expected a non-negative whole number"
+        );
+    }
+
+    #[test]
+    fn host_header_check_accepts_loopback_only() {
+        assert!(host_is_local("127.0.0.1:3000"));
+        assert!(host_is_local("127.0.0.1"));
+        assert!(host_is_local("localhost:3000"));
+        assert!(host_is_local("LOCALHOST"));
+        assert!(host_is_local("[::1]:3000"));
+        assert!(!host_is_local("evil.example.com:3000"));
+        assert!(!host_is_local("localhost.evil.com:3000"));
+        assert!(!host_is_local("[2001:db8::1]:3000"));
+        assert!(!host_is_local(""));
+    }
 }

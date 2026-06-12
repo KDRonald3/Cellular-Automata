@@ -42,7 +42,7 @@ const LARGE_SVG_THRESHOLD: u128 = 50_000_000;
 /// figure has a visible outline by default without being a heavy border.
 pub fn to_svg(result: &SimulationResult, opts: &RenderOptions) -> String {
     let width = result.width;
-    let height = if width == 0 { 0 } else { result.rows.len() / width };
+    let height = result.rows.len().checked_div(width).unwrap_or(0);
     let cs = opts.cell_size.max(1) as usize;
     let total_w = width * cs;
     let total_h = height * cs;
@@ -110,8 +110,8 @@ pub fn to_svg(result: &SimulationResult, opts: &RenderOptions) -> String {
             for y in 0..height {
                 let row = &result.rows[y * width..(y + 1) * width];
                 let y_px = y * cs + bw_int;
-                for x in 0..width {
-                    let color = if row[x] == 1 { "#000000" } else { "#ffffff" };
+                for (x, &cell) in row.iter().enumerate() {
+                    let color = if cell == 1 { "#000000" } else { "#ffffff" };
                     s.push_str("<rect x=\"");
                     push_usize(&mut s, x * cs + bw_int);
                     s.push_str("\" y=\"");
@@ -140,8 +140,8 @@ pub fn to_svg(result: &SimulationResult, opts: &RenderOptions) -> String {
                     // inner loop which does not modify `scratch`.
                     std::str::from_utf8_unchecked(scratch.as_bytes())
                 };
-                for x in 0..width {
-                    let color = if row[x] == 1 { "#000000" } else { "#ffffff" };
+                for (x, &cell) in row.iter().enumerate() {
+                    let color = if cell == 1 { "#000000" } else { "#ffffff" };
                     s.push_str("<rect x=\"");
                     push_f32_compact(&mut s, x as f32 * cs_f + bw);
                     s.push_str("\" y=\"");
@@ -231,7 +231,7 @@ fn push_f32_compact(s: &mut String, v: f32) {
         let frac = (scaled % 100) as usize;
         push_usize(s, int_part);
         s.push('.');
-        if frac % 10 == 0 {
+        if frac.is_multiple_of(10) {
             push_usize(s, frac / 10); // "50" → "5", "30" → "3"
         } else {
             if frac < 10 { s.push('0'); }
