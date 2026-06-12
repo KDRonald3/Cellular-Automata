@@ -958,7 +958,7 @@
     const det = document.createElement('details');
     // is-pinned class only on main list entries, not the pinned section itself
     det.className = 'rule-group' + (isPinned && !isPinnedGroup ? ' is-pinned' : '');
-    det.open = !!isPinnedGroup; // open in pinned section, closed in main list
+    det.open = false; // rule groups start closed everywhere, pinned section included
     det.dataset.rule = rule;
 
     const sum = document.createElement('summary');
