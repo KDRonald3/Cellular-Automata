@@ -853,7 +853,7 @@
   function displayName(e) {
     if (!e.fill && !e.align && !e.ic) return e.filename || String(e.rule);
     const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
-    return (e.generations + ' generations of rule ' + e.rule + ' ' + bnd +
+    return ('Rule ' + e.rule + ' · ' + e.generations + ' generations ' + bnd +
             ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
   }
   function shortName(e) {
@@ -891,9 +891,8 @@
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'run-name';
-    // The rule group header already says which rule this is.
-    nameSpan.textContent = shortName(e);
-    row.title = 'Rule ' + String(e.rule).padStart(3, '0') + ' · ' + shortName(e);
+    nameSpan.textContent = 'Rule ' + String(e.rule).padStart(3, '0') + ' · ' + shortName(e);
+    row.title = nameSpan.textContent;
 
     const metaSpan = document.createElement('span');
     metaSpan.className = 'run-meta';

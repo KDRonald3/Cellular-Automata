@@ -97,7 +97,7 @@
   function displayName(e) {
     if (!e.fill && !e.align && !e.ic) return e.filename;
     const bnd = (e.boundary === 'Wrap-around' || e.boundary === 'Wrap') ? 'wrap-around' : 'padded';
-    return (e.generations + ' generations of rule ' + e.rule + ' ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
+    return ('Rule ' + e.rule + ' · ' + e.generations + ' generations ' + bnd + ' fill ' + e.fill + ' ' + e.align + ' ' + e.ic).replace(/\s+/g, ' ').trim();
   }
   function shortName(e) {
     // Lead with the fields that distinguish runs inside one rule group (IC,
@@ -158,7 +158,7 @@
         row.setAttribute('data-filename', e.filename);
         row.title = 'Rule ' + String(rule).padStart(3, '0') + ' · ' + shortName(e);
         row.innerHTML =
-          '<span class="run-name">' + esc(shortName(e)) + '</span>' +
+          '<span class="run-name">' + esc(row.title) + '</span>' +
           '<span class="run-meta">#' + esc(e.id) + '</span>';
         if (canSelect) {
           const box = document.createElement('input');
