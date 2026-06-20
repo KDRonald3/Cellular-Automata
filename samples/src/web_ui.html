@@ -538,10 +538,10 @@
         <div class="form-field">
           <span class="form-label">Boundary</span>
           <div class="boundary-toggle">
-            <button type="button" class="boundary-btn active" data-value="ZeroPadded">Padded</button>
+            <button type="button" class="boundary-btn active" data-value="Padded">Padded</button>
             <button type="button" class="boundary-btn" data-value="Wrap">Wrap-around</button>
           </div>
-          <input type="hidden" id="f-boundary" value="ZeroPadded">
+          <input type="hidden" id="f-boundary" value="Padded">
         </div>
         <div class="form-field">
           <span class="form-label">Padding</span>
@@ -1053,11 +1053,17 @@
       count += ruleEntries.length;
     }
 
+    const runsByRule = new Map();
     for (const filename of pinnedRuns) {
       const e = entries.find(x => x.filename === filename);
       if (!e || pinnedRules.has(parseInt(e.rule, 10))) continue;
-      pinnedBodyEl.appendChild(createSavedRunEntry(e));
+      const r = parseInt(e.rule, 10);
+      if (!runsByRule.has(r)) runsByRule.set(r, []);
+      runsByRule.get(r).push(e);
       count++;
+    }
+    for (const rule of [...runsByRule.keys()].sort((a, b) => a - b)) {
+      pinnedBodyEl.appendChild(createRuleGroup(rule, sortRuns(runsByRule.get(rule)), true));
     }
 
     pinnedCountEl.textContent = count;
@@ -1553,7 +1559,7 @@
     document.getElementById('f-gens').value = '10';
     document.getElementById('f-width').value = '10';
     document.getElementById('f-cs').value = '4';
-    setBoundary('ZeroPadded');
+    setBoundary('Padded');
     document.getElementById('f-align').value = 'Before';
     document.getElementById('f-fill').value = 'Zero';
     document.getElementById('f-borders').checked = false;

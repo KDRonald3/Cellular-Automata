@@ -7,7 +7,7 @@ DONE=0
 SKIP=0
 FAIL=0
 
-for BOUNDARY in "ZeroPadded" "Wrap"; do
+for BOUNDARY in "Padded" "Wrap"; do
   for RULE in $(seq 0 255); do
     PAYLOAD=$(printf '{"seed":"1","rule":%d,"generations":100,"width":401,"cell_size":2,"boundary":"%s","align":"Center","fill":"Zero","show_borders":false}' "$RULE" "$BOUNDARY")
 

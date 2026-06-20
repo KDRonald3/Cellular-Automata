@@ -25,7 +25,7 @@
 //!     rule: 30,
 //!     width: 401,
 //!     generations: 200,
-//!     boundary: BoundaryMode::ZeroPadded,
+//!     boundary: BoundaryMode::Padded,
 //! };
 //! let initial = InitialRow::FromSeed {
 //!     seed: vec![1],
@@ -289,19 +289,19 @@ pub fn run(
 
     match output {
         OutputKind::Structured => {
-            let result = simulate(config, initial_row)?;
+            let result = simulate(config, initial_row,padding_fill)?;
             Ok(Output::Structured(result))
         }
         OutputKind::Json => {
-            let result = simulate(config, initial_row)?;
+            let result = simulate(config, initial_row,padding_fill)?;
             Ok(Output::Json(json::to_json(&result)))
         }
         OutputKind::Svg => {
-            let result = simulate(config, initial_row)?;
+            let result = simulate(config, initial_row,padding_fill)?;
             Ok(Output::Svg(svg::to_svg(&result, &render)))
         }
         OutputKind::Html { dir } => {
-            let result = simulate(config, initial_row)?;
+            let result = simulate(config, initial_row,padding_fill)?;
             let path = export_html(&result, &render, &dir, padding_fill, padding_align)
                 .map_err(Error::HtmlExportFailed)?;
             Ok(Output::Html(path))
@@ -350,7 +350,7 @@ fn build_initial_row(
     }
 }
 
-fn simulate(config: SimConfig, initial_row: Vec<u8>) -> Result<SimulationResult, Error> {
+fn simulate(config: SimConfig, initial_row: Vec<u8>, boundary_fill: PaddingFill) -> Result<SimulationResult, Error> {
     let rule = Rule::new(config.rule);
     let width = config.width;
     let generations = config.generations;
@@ -370,7 +370,7 @@ fn simulate(config: SimConfig, initial_row: Vec<u8>) -> Result<SimulationResult,
     let mut next = vec![0u8; width];
 
     for _ in 0..generations {
-        sim::step_row_into(&rule, &prev, &mut next, config.boundary, 0);
+        sim::step_row_into(&rule, &prev, &mut next, config.boundary, boundary_fill.value());
         // SAFETY-NOTE: `flat` was reserved up front for the full grid;
         // `extend_from_slice` is bounded by `next.len() == width` per
         // iteration and never reallocates.
@@ -428,7 +428,7 @@ mod tests {
             rule: 30,
             width: 21,
             generations: 5,
-            boundary: BoundaryMode::ZeroPadded,
+            boundary: BoundaryMode::Padded,
         };
         let initial = InitialRow::FromSeed {
             seed: vec![1],
@@ -456,7 +456,7 @@ mod tests {
             rule: 30,
             width: 0,
             generations: 1,
-            boundary: BoundaryMode::ZeroPadded,
+            boundary: BoundaryMode::Padded,
         };
         let initial = InitialRow::Explicit(Vec::new());
         let render = RenderOptions { cell_size: 1, show_borders: false, border_width: 1.0 };
@@ -472,7 +472,7 @@ mod tests {
             rule: 30,
             width: 4,
             generations: 1,
-            boundary: BoundaryMode::ZeroPadded,
+            boundary: BoundaryMode::Padded,
         };
         let initial = InitialRow::Explicit(vec![0, 1, 1]);
         let render = RenderOptions { cell_size: 1, show_borders: false, border_width: 1.0 };
@@ -489,7 +489,7 @@ mod tests {
             rule: 30,
             width: 3,
             generations: 1,
-            boundary: BoundaryMode::ZeroPadded,
+            boundary: BoundaryMode::Padded,
         };
         let initial = InitialRow::Explicit(vec![0, 2, 1]);
         let render = RenderOptions { cell_size: 1, show_borders: false, border_width: 1.0 };
@@ -506,7 +506,7 @@ mod tests {
             rule: 30,
             width: 3,
             generations: 1,
-            boundary: BoundaryMode::ZeroPadded,
+            boundary: BoundaryMode::Padded,
         };
         let initial = InitialRow::FromSeed {
             seed: vec![1, 1, 1, 1],
@@ -544,7 +544,7 @@ mod tests {
         else { panic!() };
         assert!(s.contains("\"rule\""));
         assert!(s.contains("\"rows\""));
-        assert!(s.contains("\"ZeroPadded\""));
+        assert!(s.contains("\"Padded\""));
     }
 
     #[test]

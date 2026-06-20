@@ -16,26 +16,26 @@ use serde::{Deserialize, Serialize};
 /// rightmost cells have no real neighbour on one side, so the boundary mode
 /// decides what to use instead.
 ///
-/// - [`ZeroPadded`](BoundaryMode::ZeroPadded): pretend the missing neighbour
+/// - [`Padded`](BoundaryMode::Padded): pretend the missing neighbour
 ///   is `0`. Patterns can grow off the edge and disappear forever.
 /// - [`Wrap`](BoundaryMode::Wrap): glue the two edges together so the row
 ///   becomes a circle. Patterns that fall off the right edge re-enter on the
 ///   left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BoundaryMode {
-    ZeroPadded,
+    Padded,
     Wrap,
 }
 
 impl BoundaryMode {
     /// Every variant, in display order. Handy for UI pickers.
-    pub const ALL: [BoundaryMode; 2] = [BoundaryMode::ZeroPadded, BoundaryMode::Wrap];
+    pub const ALL: [BoundaryMode; 2] = [BoundaryMode::Padded, BoundaryMode::Wrap];
 }
 
 impl std::fmt::Display for BoundaryMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BoundaryMode::ZeroPadded => write!(f, "Padded"),
+            BoundaryMode::Padded => write!(f, "Padded"),
             BoundaryMode::Wrap => write!(f, "Wrap-around"),
         }
     }
@@ -198,7 +198,7 @@ impl CellularAutomaton {
     }
 }
 
-/// Build an initial row of length `width` from a short seed pattern, padded
+/// Build an initial row of length `width` from a short seed pattern, Padded
 /// with `fill` on whichever side(s) `align` dictates.
 ///
 /// Every byte in the result is `0` or `1`. Bytes in `seed` other than `0` are
@@ -268,13 +268,13 @@ pub enum ExplicitRowError {
 /// any other thread (including the UI) from getting CPU time. The sequential
 /// in-place implementation is the regression gate — see
 /// `sim::tests::bench_2m_x_1000`.
-pub fn step_row_into(rule: &Rule, prev: &[u8], next: &mut [u8], boundary: BoundaryMode, boundary_fill: u8) {
+pub fn step_row_into(rule: &Rule, prev: &[u8], next: &mut [u8], boundary: BoundaryMode, padded: u8) {
     let width = prev.len();
     debug_assert_eq!(width, next.len());
     if width == 0 {
         return;
     }
-    let fill = boundary_fill & 1;
+    let fill = padded & 1;
     // Shared interior: cell i (1..width-1) sees the window prev[i-1..=i+1].
     // Iterating `windows(3)` zipped with `next[1..]` keeps the inner loop
     // free of per-cell bounds checks, unlike indexed `prev[i - 1]` access.
@@ -284,7 +284,7 @@ pub fn step_row_into(rule: &Rule, prev: &[u8], next: &mut [u8], boundary: Bounda
         }
     };
     match boundary {
-        BoundaryMode::ZeroPadded => {
+        BoundaryMode::Padded => {
             if width == 1 {
                 next[0] = rule.apply(fill, prev[0], fill);
             } else {
@@ -309,9 +309,9 @@ pub fn step_row_into(rule: &Rule, prev: &[u8], next: &mut [u8], boundary: Bounda
 
 /// Allocating variant of [`step_row_into`]: returns a freshly allocated next
 /// row instead of writing into a caller-owned buffer.
-pub fn step_row(rule: &Rule, prev: &[u8], boundary: BoundaryMode, boundary_fill: u8) -> Vec<u8> {
+pub fn step_row(rule: &Rule, prev: &[u8], boundary: BoundaryMode, padded: u8) -> Vec<u8> {
     let mut next = vec![0u8; prev.len()];
-    step_row_into(rule, prev, &mut next, boundary, boundary_fill);
+    step_row_into(rule, prev, &mut next, boundary, padded);
     next
 }
 
@@ -386,7 +386,7 @@ mod tests {
                 v[10] = 1;
                 v
             },
-            BoundaryMode::ZeroPadded,
+            BoundaryMode::Padded,
         );
         ca.run();
         assert_eq!(ca.rows().len(), 6);

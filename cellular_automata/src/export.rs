@@ -43,7 +43,7 @@ pub(crate) fn export_job(input: &ExportInput, dir: &Path) -> io::Result<PathBuf>
     let ts_human = now.format("%Y-%m-%d %H:%M:%S").to_string();
 
     let boundary_short = match input.boundary {
-        BoundaryMode::ZeroPadded => "padded",
+        BoundaryMode::Padded => "padded",
         BoundaryMode::Wrap => "wraparound",
     };
 

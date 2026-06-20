@@ -544,7 +544,7 @@ struct SaveResponse {
 
 fn parse_boundary(s: &str) -> Option<BoundaryMode> {
     match s {
-        "ZeroPadded" => Some(BoundaryMode::ZeroPadded),
+        "Padded" => Some(BoundaryMode::Padded),
         "Wrap" => Some(BoundaryMode::Wrap),
         _ => None,
     }
@@ -584,7 +584,7 @@ fn align_label(a: PaddingAlign) -> &'static str {
 
 fn boundary_label(b: BoundaryMode) -> &'static str {
     match b {
-        BoundaryMode::ZeroPadded => "Padded",
+        BoundaryMode::Padded => "Padded",
         BoundaryMode::Wrap => "Wrap-around",
     }
 }
